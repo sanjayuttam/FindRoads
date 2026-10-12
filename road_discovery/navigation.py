@@ -103,14 +103,20 @@ def generate_multi_road_tour_url(
     destination = stops[-1]
     waypoints = [f"{round(lat, 6)},{round(lon, 6)}" for lat, lon in stops[1:-1]]
 
+    orig_str = f"{round(origin[0], 6)},{round(origin[1], 6)}"
+    dest_str = f"{round(destination[0], 6)},{round(destination[1], 6)}"
+
+    if orig_str == dest_str:
+        dest_str = f"{round(destination[0] + 0.0002, 6)},{round(destination[1] + 0.0002, 6)}"
+
     params = {
         "api": "1",
-        "origin": f"{round(origin[0], 6)},{round(origin[1], 6)}",
-        "destination": f"{round(destination[0], 6)},{round(destination[1], 6)}",
+        "origin": orig_str,
+        "destination": dest_str,
         "travelmode": "driving",
     }
     if waypoints:
-        params["waypoints"] = "|".join(waypoints)
+        params["waypoints"] = "|".join(waypoints[:8])
 
     return f"https://www.google.com/maps/dir/?{urllib.parse.urlencode(params)}"
 

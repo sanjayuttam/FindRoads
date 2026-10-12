@@ -289,12 +289,12 @@ class LoopRouteBuilder:
             }
             features.append(feat)
 
-        waypoint_coords.append([start_lat, start_lon])
-
         # Construct 1-click Google Maps driving loop tour URL
-        wp_str_list = [f"{pt[0]:.5f},{pt[1]:.5f}" for pt in waypoint_coords[1:-1]]
+        orig_str = f"{start_lat:.5f},{start_lon:.5f}"
+        dest_str = f"{start_lat + 0.0002:.5f},{start_lon + 0.0002:.5f}"
+        wp_str_list = [f"{pt[0]:.5f},{pt[1]:.5f}" for pt in waypoint_coords[1:] if f"{pt[0]:.5f},{pt[1]:.5f}" != orig_str]
         wp_param = "%7C".join(wp_str_list[:8]) # Max 8 waypoints for Google Maps
-        gmaps_loop_tour = f"https://www.google.com/maps/dir/?api=1&origin={start_lat:.5f},{start_lon:.5f}&destination={start_lat:.5f},{start_lon:.5f}&travelmode=driving&waypoints={wp_param}"
+        gmaps_loop_tour = f"https://www.google.com/maps/dir/?api=1&origin={orig_str}&destination={dest_str}&travelmode=driving&waypoints={wp_param}"
 
         return {
             "type": "FeatureCollection",

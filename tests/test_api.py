@@ -85,6 +85,13 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertIn("cop_risk_pct", props)
         self.assertEqual(geojson["metadata"]["route_mode"], "loop")
 
+        tour_url = geojson["metadata"]["google_maps_tour_url"]
+        self.assertIn("https://www.google.com/maps/dir/?api=1", tour_url)
+        # Parse origin and destination params from URL to ensure they are distinct
+        import urllib.parse
+        parsed = urllib.parse.parse_qs(urllib.parse.urlparse(tour_url).query)
+        self.assertNotEqual(parsed["origin"][0], parsed["destination"][0])
+
     def test_loop_route_api_invalid_address(self):
         # Non-existent geocoding query should return clean HTTP 400 Bad Request
         response = self.client.post(
