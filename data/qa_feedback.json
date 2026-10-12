@@ -28,5 +28,20 @@
     ],
     "notes": "Too many houses and driveways",
     "timestamp": "2026-10-11T23:16:30.569421"
+  },
+  {
+    "id": "qa_3_1791775320",
+    "road_name": "White Meadow Avenue",
+    "location": "Ringwood, NJ",
+    "user_rating": 2,
+    "algo_score": 62.0,
+    "suggested_score": 25.0,
+    "error_delta": 37.0,
+    "tags": [
+      "too_residential",
+      "low_speed_limit"
+    ],
+    "notes": "Too many houses and driveways",
+    "timestamp": "2026-10-11T23:22:00.463037"
   }
 ]

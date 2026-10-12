@@ -410,11 +410,15 @@ class RoadNetworkIngester:
         shop = data.get("shop")
         amenity = str(data.get("amenity", "")).lower()
 
+        comm_keywords = {"avenue", "ave", "broadway", "street", "st", "plaza", "center", "mall", "boulevard", "blvd", "shopping"}
+        has_comm_name = bool(name_words & comm_keywords)
+
         data["is_commercial"] = (
             landuse in {"commercial", "retail"}
             or building in {"commercial", "retail", "supermarket"}
             or shop is not None
             or amenity in {"fast_food", "restaurant", "fuel", "bank", "cafe", "pub", "marketplace"}
+            or (has_comm_name and highway in {"primary", "secondary"})
         )
 
         # Smoothness & Road Surface Quality
