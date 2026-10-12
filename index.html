@@ -662,6 +662,7 @@
           <td title="${item.name}">
             <strong>${item.name}</strong>
             ${item.streetViewUrl ? `<a href="${item.streetViewUrl}" target="_blank" onclick="event.stopPropagation();" style="margin-left:4px; text-decoration:none;" title="Open 1-Click Google Street View for ${item.name}">📷</a>` : ''}
+            <button type="button" onclick="event.stopPropagation(); openQAModal('${item.name.replace(/'/g, "\\'")}', ${item.score});" style="background:transparent; border:none; cursor:pointer; padding:0 2px; margin-left:4px; font-size:12px;" title="QA &amp; Rate ${item.name}">⭐</button>
           </td>
           <td><span class="score-pill" style="background:color-mix(in srgb, ${item.copColor} 18%, transparent); color:${item.copColor}; border:1px solid ${item.copColor};">${item.copLevel} (${item.copRiskPct.toFixed(0)}%)</span></td>
           <td style="text-align:right;"><span class="score-pill" style="background:color-mix(in srgb, ${item.color} 20%, transparent); color:${item.color}; border:1px solid ${item.color};">${item.score.toFixed(1)}</span></td>
