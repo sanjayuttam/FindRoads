@@ -1,0 +1,2 @@
+[console_scripts]
+find-roads = road_discovery.cli:main

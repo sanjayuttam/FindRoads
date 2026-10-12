@@ -1,0 +1,1884 @@
+<!DOCTYPE html>
+<html lang="en" data-palette="catppuccin" data-mode="ink">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Road Discovery &bull; The Driver Runtime</title>
+  <meta name="description" content="Stitch twisty ridge lines, mountain passes, and scenic sweepers into continuous driving routes. Export to Google Maps, Apple Maps, GPX, and KML." />
+  <meta name="theme-color" content="#17171a" />
+
+  <!-- Herdr Fonts: Archivo, Inter, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,600;0,700;0,800;0,900;1,800;1,900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <script>
+    /* Herdr Ground selection: ink (dark) vs paper (light) */
+    window.herdrGround = {
+      read: function () {
+        try {
+          return localStorage.getItem("roads-ground") === "paper" ? "paper" : "ink";
+        } catch (e) {
+          return "ink";
+        }
+      },
+      apply: function (mode) {
+        var root = document.documentElement;
+        root.setAttribute("data-mode", mode);
+        root.setAttribute("data-palette", mode === "paper" ? "solarized-light" : "catppuccin");
+        var inkBtn = document.querySelector('[data-ground="ink"]');
+        var paperBtn = document.querySelector('[data-ground="paper"]');
+        if (inkBtn && paperBtn) {
+          inkBtn.setAttribute("aria-pressed", mode === "ink" ? "true" : "false");
+          paperBtn.setAttribute("aria-pressed", mode === "paper" ? "true" : "false");
+        }
+        return mode;
+      },
+      save: function (mode) {
+        try {
+          localStorage.setItem("roads-ground", mode);
+        } catch (e) {}
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="site.css" />
+  <style>
+    /* ──────────────────────────────────────────────────────────────
+       herdr.dev design system & tokens
+       ────────────────────────────────────────────────────────────── */
+    :root {
+      --disp: "Archivo", system-ui, -apple-system, sans-serif;
+      --body: "Inter", system-ui, -apple-system, sans-serif;
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --gut: 36px;
+      --max: 1440px;
+      --run: #5fae74;
+      --wait: #d3a027;
+      --idle: #5a615c;
+      --done: #94e2d5;
+      --red: #f38ba8;
+      --yellow: #f9e2af;
+      --green: #a6e3a1;
+      --radius-sm: 2px;
+      --radius-md: 4px;
+    }
+
+    html,
+    html[data-mode="ink"] {
+      --bg: #17171a;
+      --panel: #1e1e22;
+      --mass: #26262b;
+      --ink: #eae8ee;
+      --dim: #cdccd2;
+      --faint: #b0afb6;
+      --faint2: #908f96;
+      --line: #26262b;
+      --line2: #35353d;
+      --spot: #cba6f7;
+      --spot-ink: #17171a;
+      --grid: #202024;
+      --term-bg: #11111b;
+      --term-sidebar-bg: #181825;
+      --term-active-bg: #1e1e2e;
+      --term-border: #313244;
+      --term-text: #cdd6f4;
+      --term-muted: #6c7086;
+      --term-tab-bg: #1e1e2e;
+    }
+
+    html[data-mode="paper"] {
+      --bg: #efece5;
+      --panel: #e7e3da;
+      --mass: #ddd8cc;
+      --ink: #15140f;
+      --dim: #55534a;
+      --faint: #86826f;
+      --faint2: #928e79;
+      --line: #e2ded4;
+      --line2: #cbc5b6;
+      --spot: #8839ef;
+      --spot-ink: #fff;
+      --grid: #e4e0d6;
+      --term-bg: #fdf6e3;
+      --term-sidebar-bg: #eee8d5;
+      --term-active-bg: #e6dec8;
+      --term-border: #d6ceb8;
+      --term-text: #657b83;
+      --term-muted: #93a1a1;
+      --term-tab-bg: #e6dec8;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    body.site {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--body);
+      font-size: 14.5px;
+      line-height: 1.65;
+      background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 72px 72px;
+      overflow-x: clip;
+      padding-bottom: 72px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body.site ::selection {
+      background: var(--spot);
+      color: var(--spot-ink);
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+      transition: color 0.12s ease;
+    }
+
+    code, pre {
+      font-family: var(--mono);
+    }
+
+    .hd-frame {
+      max-width: var(--max);
+      margin: 0 auto;
+      background: var(--bg);
+      position: relative;
+      border-left: 1px solid var(--line2);
+      border-right: 1px solid var(--line2);
+      border-bottom: 1px solid var(--line2);
+    }
+
+    /* ── Navbar ── */
+    .hd-nav {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      height: 60px;
+      padding: 0 var(--gut);
+      border-bottom: 1px solid var(--line2);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: color-mix(in srgb, var(--bg) 95%, transparent);
+      backdrop-filter: blur(12px);
+    }
+
+    .lock {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+
+    .lock svg {
+      width: 24px;
+      height: 24px;
+      fill: var(--spot);
+    }
+
+    .lock b {
+      font-family: var(--disp);
+      font-weight: 900;
+      font-size: 20px;
+      letter-spacing: -0.045em;
+      color: var(--ink);
+    }
+
+    .lock b span {
+      color: var(--spot);
+      font-weight: 400;
+    }
+
+    .hd-nav .sp {
+      flex: 1;
+    }
+
+    .hd-nav a.lnk {
+      color: var(--dim);
+      font-size: 11.5px;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      font-family: var(--mono);
+      font-weight: 500;
+    }
+
+    .hd-nav a.lnk:hover,
+    .hd-nav a.lnk.active {
+      color: var(--ink);
+    }
+
+    .hd-nav .btn {
+      border: 1px solid var(--line2);
+      padding: 7px 15px;
+      color: var(--ink);
+      font-size: 11.5px;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      font-family: var(--mono);
+      font-weight: 600;
+      transition: all 0.12s ease;
+    }
+
+    .hd-nav .btn:hover {
+      background: var(--spot);
+      color: var(--spot-ink);
+      border-color: var(--spot);
+    }
+
+    .hd-nav .ico {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 auto;
+      border: 1px solid var(--line2);
+      color: var(--dim);
+    }
+
+    .hd-nav .ico.wide {
+      width: auto;
+      gap: 8px;
+      padding: 0 10px;
+    }
+
+    .hd-nav .ico svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+
+    .hd-nav .ico b {
+      font-family: var(--mono);
+      font-weight: 400;
+      font-size: 11.5px;
+      letter-spacing: 0.04em;
+    }
+
+    .hd-nav .ico:hover {
+      color: var(--spot);
+      border-color: var(--spot);
+    }
+
+    .mode {
+      display: flex;
+      border: 1px solid var(--line2);
+    }
+
+    .mode button {
+      background: none;
+      border: 0;
+      color: var(--faint);
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      padding: 7px 10px;
+    }
+
+    .mode button:hover {
+      color: var(--ink);
+    }
+
+    .mode button[aria-pressed="true"] {
+      background: var(--ink);
+      color: var(--bg);
+      font-weight: 700;
+    }
+
+    /* ── Hero ── */
+    .hd-hero {
+      position: relative;
+      overflow: hidden;
+      padding: 68px var(--gut) 56px;
+      border-bottom: 1px solid var(--line2);
+    }
+
+    .seed-ribbon {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 2;
+      padding: 10px 24px 10px var(--gut);
+      background: var(--green);
+      color: #17171a;
+      clip-path: polygon(0 0, 100% 0, calc(100% - 16px) 100%, 0 100%);
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--mono);
+      letter-spacing: 0.02em;
+    }
+
+    .seed-ribbon span {
+      margin-left: 10px;
+      color: #17171a;
+    }
+
+    .seed-ribbon:hover {
+      filter: brightness(1.08);
+    }
+
+    .hd-hero .ghost-art {
+      position: absolute;
+      right: -8%;
+      top: 50%;
+      transform: translateY(-50%);
+      width: min(720px, 52vw);
+      height: min(720px, 52vw);
+      opacity: 0.04;
+      pointer-events: none;
+      color: var(--ink);
+    }
+
+    .hd-hero .in {
+      position: relative;
+      z-index: 1;
+    }
+
+    .hd-eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--spot);
+      font-size: 11px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      font-family: var(--mono);
+      font-weight: 600;
+    }
+
+    .hd-eyebrow s {
+      width: 42px;
+      height: 1px;
+      background: var(--spot);
+      text-decoration: none;
+    }
+
+    h1 {
+      font-family: var(--disp);
+      font-weight: 900;
+      letter-spacing: -0.055em;
+      line-height: 0.88;
+      font-size: clamp(38px, 6.2vw, 118px);
+      margin: 24px 0 0;
+      max-width: 20ch;
+      color: var(--ink);
+    }
+
+    h1 em {
+      font-style: normal;
+      color: var(--spot);
+    }
+
+    .lede {
+      color: var(--dim);
+      font-size: 15.5px;
+      line-height: 1.75;
+      max-width: 54ch;
+      margin: 32px 0 0;
+    }
+
+    .lede b {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .go {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      margin-top: 38px;
+      flex-wrap: wrap;
+    }
+
+    .hd-cmd {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line2);
+      background: color-mix(in srgb, var(--bg) 80%, transparent);
+      backdrop-filter: blur(6px);
+    }
+
+    .hd-cmd code {
+      padding: 14px 19px;
+      font-size: 13.5px;
+      font-family: var(--mono);
+      color: var(--ink);
+    }
+
+    .hd-cmd code b {
+      color: var(--spot);
+      font-weight: 600;
+      margin-right: 11px;
+    }
+
+    .hd-cmd button {
+      padding: 14px 18px;
+      border: 0;
+      border-left: 1px solid var(--line2);
+      background: none;
+      cursor: pointer;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-weight: 600;
+      transition: all 0.12s ease;
+    }
+
+    .hd-cmd button:hover {
+      color: var(--spot);
+      background: color-mix(in srgb, var(--spot) 8%, transparent);
+    }
+
+    .hero-meta {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: baseline;
+      column-gap: 24px;
+      margin-top: 24px;
+    }
+
+    .hero-meta > .meta {
+      color: var(--faint);
+      font-size: 11.5px;
+      letter-spacing: 0.04em;
+      font-family: var(--mono);
+    }
+
+    .hero-meta > .meta a {
+      color: var(--spot);
+      text-decoration: none;
+    }
+
+    .hero-meta > .meta a:hover {
+      text-decoration: underline;
+    }
+
+    .hero-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 600;
+      font-family: var(--mono);
+    }
+
+    .hero-link > span {
+      padding: 3px 7px;
+      background: var(--spot);
+      color: var(--spot-ink);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .hero-link > b {
+      color: var(--spot);
+      font-size: 18px;
+    }
+
+    .hero-link:hover {
+      color: var(--spot);
+    }
+
+    /* ── Numbers Strip ── */
+    .strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-bottom: 1px solid var(--line2);
+    }
+
+    .stat {
+      position: relative;
+      display: block;
+      overflow: hidden;
+      text-decoration: none;
+      padding: 24px var(--gut) 26px;
+      border-right: 1px solid var(--line);
+      transition: background 0.12s ease;
+    }
+
+    .stat:last-child {
+      border-right: 0;
+    }
+
+    .stat:hover {
+      background: color-mix(in srgb, var(--spot) 5%, transparent);
+    }
+
+    .stat b {
+      position: relative;
+      z-index: 1;
+      display: block;
+      font-family: var(--disp);
+      font-weight: 900;
+      font-size: clamp(26px, 3vw, 42px);
+      letter-spacing: -0.045em;
+      line-height: 1;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat span {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-top: 11px;
+      color: var(--faint);
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      font-family: var(--mono);
+    }
+
+    .stat:hover span {
+      color: var(--dim);
+    }
+
+    .stat .ic {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 14px;
+      fill: currentColor;
+      color: var(--spot);
+      opacity: 0.85;
+    }
+
+    .stat i.live {
+      width: 6px;
+      height: 6px;
+      flex: 0 0 6px;
+      background: var(--run);
+      animation: site-pulse 2.2s ease-in-out infinite;
+      display: inline-block;
+    }
+
+    @keyframes site-pulse {
+      0%, 100% { opacity: 0.25; }
+      50% { opacity: 1; }
+    }
+
+    /* ── Terminal Mockup Section ── */
+    .fig {
+      padding: 40px var(--gut) 46px;
+      border-bottom: 1px solid var(--line2);
+    }
+
+    .fighd {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      padding: 0 0 12px;
+      color: var(--faint);
+      font-size: 10.5px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      font-family: var(--mono);
+    }
+
+    .fighd i {
+      font-style: normal;
+      color: var(--spot);
+      letter-spacing: 0.1em;
+    }
+
+    .fighd .r {
+      margin-left: auto;
+      text-align: right;
+    }
+
+    .plate {
+      border: 1px solid var(--line2);
+      background: var(--term-bg);
+      overflow: hidden;
+    }
+
+    .herdr-ui-mock {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      min-height: 440px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .mock-sidebar {
+      background: var(--term-sidebar-bg);
+      border-right: 1px solid var(--term-border);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .mock-sidebar-title {
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--term-muted);
+      margin-bottom: 8px;
+    }
+
+    .mock-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      color: var(--term-text);
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.12s ease;
+    }
+
+    .mock-item:hover, .mock-item.active {
+      background: var(--term-active-bg);
+      border-color: var(--term-border);
+    }
+
+    .mock-item.active strong {
+      color: var(--spot);
+    }
+
+    .mock-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot-working { background: var(--yellow); }
+    .dot-done { background: var(--green); }
+    .dot-idle { background: var(--idle); }
+
+    .mock-item small {
+      display: block;
+      color: var(--term-muted);
+      font-size: 10.5px;
+    }
+
+    .mock-main {
+      display: flex;
+      flex-direction: column;
+      background: var(--term-bg);
+    }
+
+    .mock-tabs {
+      display: flex;
+      align-items: center;
+      background: var(--term-sidebar-bg);
+      border-bottom: 1px solid var(--term-border);
+      padding: 0 8px;
+    }
+
+    .mock-tab {
+      padding: 10px 18px;
+      color: var(--term-muted);
+      cursor: pointer;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      border-bottom: 2px solid transparent;
+      user-select: none;
+      transition: all 0.12s ease;
+    }
+
+    .mock-tab:hover {
+      color: var(--term-text);
+    }
+
+    .mock-tab.active {
+      color: var(--spot);
+      border-bottom-color: var(--spot);
+      background: var(--term-bg);
+    }
+
+    .mock-terminal-pane {
+      padding: 24px;
+      flex: 1;
+      overflow-y: auto;
+      line-height: 1.7;
+      color: var(--term-text);
+    }
+
+    .tui-line {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .tui-prompt {
+      color: var(--spot);
+      font-weight: 700;
+    }
+
+    .tui-green { color: var(--green); }
+    .tui-yellow { color: var(--yellow); }
+    .tui-dim { color: var(--term-muted); }
+    .tui-cyan { color: #89dceb; }
+    .tui-purple { color: var(--spot); }
+
+    .figcap {
+      margin: 13px 0 0;
+      color: var(--faint);
+      font-size: 11.5px;
+      line-height: 1.7;
+      font-family: var(--mono);
+    }
+
+    .figcap b {
+      color: var(--dim);
+      font-weight: 500;
+    }
+
+    /* ── Router Rows (.caps) ── */
+    .caps {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      border-bottom: 1px solid var(--line2);
+    }
+
+    .caps > .cap {
+      display: grid;
+      grid-template-columns: 100px minmax(0, 1fr) 400px;
+      gap: 0 32px;
+      align-items: start;
+      padding: 36px var(--gut);
+      border-bottom: 1px solid var(--line);
+      text-decoration: none;
+      transition: background 0.12s ease;
+    }
+
+    .caps > .cap:last-child {
+      border-bottom: 0;
+    }
+
+    .caps > .cap:hover {
+      background: color-mix(in srgb, var(--spot) 4%, transparent);
+    }
+
+    .caps .n {
+      display: flex;
+      flex-direction: column;
+      gap: 13px;
+      align-items: flex-start;
+      line-height: 1;
+    }
+
+    .caps .n > span:first-child {
+      font-family: var(--disp);
+      font-weight: 900;
+      font-size: 48px;
+      letter-spacing: -0.05em;
+      color: var(--mass);
+      transition: color 0.12s ease;
+    }
+
+    .caps > .cap:hover .n > span:first-child {
+      color: var(--line2);
+    }
+
+    .caps h3 {
+      margin: 0;
+      font-family: var(--disp);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      font-size: 24px;
+      color: var(--ink);
+      transition: color 0.12s ease;
+    }
+
+    .caps > .cap:hover h3 {
+      color: var(--spot);
+    }
+
+    .caps .arw {
+      margin-left: 6px;
+      font-family: var(--body);
+      font-weight: 400;
+      font-size: 16px;
+      color: var(--faint);
+      transition: all 0.12s ease;
+    }
+
+    .caps > .cap:hover .arw {
+      color: var(--spot);
+      margin-left: 12px;
+    }
+
+    .caps p {
+      margin: 12px 0 0;
+      color: var(--dim);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .caps .steps-list {
+      margin: 16px 0 0;
+      padding-left: 20px;
+      color: var(--dim);
+      font-size: 13px;
+      line-height: 1.8;
+    }
+
+    .caps .steps-list li b {
+      color: var(--ink);
+    }
+
+    .caps .cap-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+
+    .btn-action-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--spot);
+      color: var(--spot-ink);
+      padding: 10px 18px;
+      border: 1px solid var(--spot);
+      font-family: var(--mono);
+      font-size: 11.5px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+
+    .btn-action-primary:hover {
+      background: var(--ink);
+      color: var(--bg);
+      border-color: var(--ink);
+    }
+
+    .btn-action-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: transparent;
+      color: var(--ink);
+      padding: 10px 18px;
+      border: 1px solid var(--line2);
+      font-family: var(--mono);
+      font-size: 11.5px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+
+    .btn-action-secondary:hover {
+      background: var(--spot);
+      color: var(--spot-ink);
+      border-color: var(--spot);
+    }
+
+    .caps .ev {
+      align-self: start;
+      justify-self: end;
+      width: 100%;
+      max-width: 400px;
+      box-sizing: border-box;
+      border: 1px solid var(--line2);
+      background: var(--panel);
+      padding: 16px 18px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--faint);
+    }
+
+    .caps .ev-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 6px 0;
+    }
+
+    .caps .ev-row > span {
+      color: var(--dim);
+    }
+
+    .caps .ev-row b {
+      margin-left: auto;
+      font-weight: 400;
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--ink);
+    }
+
+    .caps .ev-row i {
+      display: block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex: 0 0 auto;
+    }
+
+    .caps .ev-row i.beat {
+      background: var(--run);
+      animation: site-pulse 2.2s ease-in-out infinite;
+    }
+
+    .caps .ev-code {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      color: var(--dim);
+      font-size: 11px;
+      line-height: 1.6;
+      overflow-x: auto;
+    }
+
+    /* ── App Store / Plugin Grid Section ── */
+    .ph {
+      padding: 68px var(--gut) 36px;
+      border-bottom: 1px solid var(--line2);
+    }
+
+    .ph-split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 40px;
+      align-items: end;
+    }
+
+    .ph h2 {
+      margin: 0;
+      font-family: var(--disp);
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      font-size: clamp(30px, 4.2vw, 54px);
+      line-height: 1;
+      color: var(--ink);
+    }
+
+    .ph p {
+      margin: 16px 0 0;
+      color: var(--dim);
+      font-size: 14.5px;
+      line-height: 1.75;
+      max-width: 60ch;
+    }
+
+    .plugins-controls {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 20px var(--gut);
+      border-bottom: 1px solid var(--line2);
+      background: var(--panel);
+    }
+
+    .plugins-search-wrap {
+      position: relative;
+      flex: 1;
+      min-width: 260px;
+    }
+
+    .plugins-search {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--line2);
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 13px;
+      padding: 12px 14px 12px 38px;
+      border-radius: 0;
+      transition: border-color 0.12s ease;
+    }
+
+    .plugins-search:focus {
+      outline: 0;
+      border-color: var(--spot);
+    }
+
+    .plugins-search-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--spot);
+      font-size: 14px;
+    }
+
+    .plugins-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 16px;
+      padding: 28px var(--gut) 42px;
+      border-bottom: 1px solid var(--line2);
+    }
+
+    .plugin-card {
+      display: flex;
+      flex-direction: column;
+      padding: 22px 24px;
+      background: var(--panel);
+      border: 1px solid var(--line2);
+      transition: all 0.12s ease;
+      text-decoration: none;
+    }
+
+    .plugin-card:hover {
+      background: color-mix(in srgb, var(--spot) 6%, var(--panel));
+      border-color: var(--spot);
+    }
+
+    .plugin-card-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .plugin-title {
+      font-size: 16px;
+      letter-spacing: -0.01em;
+      font-family: var(--disp);
+      font-weight: 800;
+    }
+
+    .plugin-owner {
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .plugin-name {
+      color: var(--ink);
+    }
+
+    .plugin-card:hover .plugin-name {
+      color: var(--spot);
+    }
+
+    .plugin-badge-pill {
+      margin-left: auto;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border: 1px solid var(--line2);
+      color: var(--dim);
+      background: var(--bg);
+    }
+
+    .plugin-desc {
+      margin: 14px 0 0;
+      color: var(--dim);
+      font-size: 13px;
+      line-height: 1.65;
+      flex: 1;
+    }
+
+    .plugin-meta-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .store-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border: 1px solid var(--line2);
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.12s ease;
+    }
+
+    .store-btn svg {
+      width: 13px;
+      height: 13px;
+      fill: currentColor;
+    }
+
+    .store-btn:hover {
+      background: var(--spot);
+      color: var(--spot-ink);
+      border-color: var(--spot);
+    }
+
+    /* ── Bottom CTA (.end) ── */
+    .end {
+      padding: 64px var(--gut);
+      border-bottom: 1px solid var(--line2);
+      background: color-mix(in srgb, var(--spot) 3%, var(--bg));
+      text-align: center;
+    }
+
+    .end .in {
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    .end h2 {
+      margin: 0;
+      font-family: var(--disp);
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      font-size: clamp(28px, 4vw, 48px);
+      color: var(--ink);
+    }
+
+    .end p {
+      margin: 16px 0 0;
+      color: var(--dim);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .end .download-pills {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 32px;
+      flex-wrap: wrap;
+    }
+
+    /* ── Footer ── */
+    .site-footer {
+      padding: 32px var(--gut);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 11.5px;
+      letter-spacing: 0.04em;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .site-footer a {
+      color: var(--dim);
+    }
+
+    .site-footer a:hover {
+      color: var(--spot);
+    }
+
+    /* Responsive */
+    @media (max-width: 1000px) {
+      .strip {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .stat:nth-child(2) {
+        border-right: 0;
+      }
+      .stat:nth-child(1), .stat:nth-child(2) {
+        border-bottom: 1px solid var(--line);
+      }
+      .caps > .cap {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 24px 0;
+      }
+      .caps .ev {
+        justify-self: stretch;
+        max-width: none;
+      }
+      .herdr-ui-mock {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .mock-sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--term-border);
+      }
+    }
+
+    @media (max-width: 640px) {
+      :root {
+        --gut: 18px;
+      }
+      .strip {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .stat {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .hd-nav .lnk {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body class="site">
+  <div class="hd-frame">
+
+    <!-- ── Header Navigation ── -->
+    <nav class="hd-nav">
+      <a class="lock" href="/">
+        <span class="ram"></span>
+        <b>findroads</b>
+        <span class="tag-badge">v0.2.0</span>
+      </a>
+      <div class="sp"></div>
+      <a class="lnk" href="/">Map</a>
+      <a class="lnk active" href="/navigation_guide.html">Scoring Guide</a>
+      <a class="lnk" href="#apps">Supported Apps</a>
+      <a class="lnk" href="/#presets">Presets</a>
+      <a class="lnk" href="/#faq">FAQ</a>
+
+      <div class="mode" aria-label="Theme mode toggle">
+        <button type="button" data-ground="ink" aria-pressed="true" onclick="window.herdrGround.save(window.herdrGround.apply('ink'))">ink</button>
+        <button type="button" data-ground="paper" aria-pressed="false" onclick="window.herdrGround.save(window.herdrGround.apply('paper'))">paper</button>
+      </div>
+
+      <a class="btn" href="/">Open Map &rarr;</a>
+
+      <button type="button" class="menu" id="nav-menu" aria-expanded="false" aria-controls="nav-sheet" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </nav>
+
+    <!-- Mobile Nav Sheet -->
+    <div class="sheet" id="nav-sheet">
+      <a href="/">Map View</a>
+      <a href="/navigation_guide.html">Scoring Guide</a>
+      <a href="#apps">Supported Apps</a>
+      <a href="/#presets">Presets</a>
+      <a href="/#faq">FAQ</a>
+      <div class="sheet-ground">
+        <span>Ground</span>
+        <div class="mode">
+          <button type="button" data-ground="ink" aria-pressed="true">ink</button>
+          <button type="button" data-ground="paper" aria-pressed="false">paper</button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Hero Header -->
+    <header class="hd-hero">
+      <a class="seed-ribbon" href="#methods">
+        Discovered 20 driving routes in Warwick, NY &bull; Ready for GPS <span>↗</span>
+      </a>
+
+      <!-- Background stylized curve watermark -->
+      <svg class="ghost-art" viewBox="0 0 200 200" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M20,180 C60,180 40,80 100,80 C160,80 140,20 180,20 M40,190 C75,190 60,95 110,95 C160,95 150,35 190,35"/>
+      </svg>
+
+      <div class="in">
+        <div class="hd-eyebrow"><s></s> the driver runtime</div>
+        <h1>Drive them <em>anywhere.</em> Keep them routed.</h1>
+        <p class="lede">
+          Road Discovery extracts twisty mountain ridges, elevation sweepers, and scenic backroads into continuous driving routes. 
+          <b>Export directly to Google Maps, Apple Maps, GPX for dedicated CarPlay/sports car GPS, or permanent Google My Maps layers with zero rerouting surprises.</b>
+        </p>
+        
+        <div class="go" style="display:flex; gap:14px; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:24px;">
+          <a class="btn-action-primary" href="#methods" style="padding: 13px 26px; font-size: 13px; font-weight: 700; text-decoration: none;">
+            <svg style="width:16px;height:16px;fill:currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+            Explore 3 Navigation Pipelines &rarr;
+          </a>
+          <a class="btn-action-secondary" href="index.html" style="padding: 13px 26px; font-size: 13px; font-weight: 700; text-decoration: none;">
+            🗺️ Back to Map Visualizer
+          </a>
+        </div>
+
+        <div class="hero-meta">
+          <div class="meta">Apple Maps &middot; Google Maps &middot; InRoute &middot; Kurviger &middot; GPX &middot; KML &nbsp;&mdash;&nbsp; <a href="#methods">view 3 navigation pipelines &rarr;</a></div>
+          <a class="hero-link" href="https://www.google.com/maps/dir/?api=1&origin=41.205036%2C-74.242754&destination=41.296416%2C-74.462541&travelmode=driving&waypoints=41.249414%2C-74.36154%7C41.25485%2C-74.307796%7C41.265185%2C-74.428661%7C41.213645%2C-74.297465%7C41.182507%2C-74.320656%7C41.207617%2C-74.387094%7C41.331991%2C-74.356828" target="_blank" rel="noopener">
+            <span>Direct</span> 1-Click Google Maps Tour <b>&rarr;</b>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <!-- Numbers Strip -->
+    <div class="strip">
+      <div class="stat">
+        <b>20</b>
+        <span>
+          <svg class="ic" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+          discovered passes <i class="live"></i>
+        </span>
+      </div>
+      <div class="stat">
+        <b>18.5 <small style="font-size:0.5em;color:var(--faint)">km</small></b>
+        <span>
+          <svg class="ic" viewBox="0 0 24 24"><path d="M4 6l6 6-6 6M13 18h7" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          longest ridge segment
+        </span>
+      </div>
+      <div class="stat">
+        <b>74 / 100</b>
+        <span>
+          <svg class="ic" viewBox="0 0 24 24"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.45L12 17.45 6.2 20.5l1.1-6.45-4.7-4.6 6.5-.95z"/></svg>
+          avg sinuosity index
+        </span>
+      </div>
+      <div class="stat">
+        <b>3</b>
+        <span>
+          <svg class="ic" viewBox="0 0 24 24"><path d="M3 3h8v8H3zM13 3h8v8h-8zM3 13h8v8H3zM13 13h8v8h-8z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          export pipelines (.gpx, .kml, gmaps)
+        </span>
+      </div>
+    </div>
+
+    <!-- Terminal Mockup Window -->
+    <section class="fig">
+      <div class="fighd">
+        <span>the pipeline, running live on openstreetmap topology</span>
+        <span class="r">click tabs to inspect exports</span>
+      </div>
+      <div class="plate">
+        <div class="herdr-ui-mock">
+          <aside class="mock-sidebar">
+            <div>
+              <div class="mock-sidebar-title">discovered loops</div>
+              <div class="mock-item active" onclick="switchMockTab('cli')">
+                <span class="mock-dot dot-working"></span>
+                <div><strong>warwick-ridge-loop</strong><small>20 continuous passes</small></div>
+              </div>
+              <div class="mock-item" onclick="switchMockTab('gpx')">
+                <span class="mock-dot dot-done"></span>
+                <div><strong>greenwood-lake-turn</strong><small>sinuosity 82/100</small></div>
+              </div>
+              <div class="mock-item" onclick="switchMockTab('dispatch')">
+                <span class="mock-dot dot-done"></span>
+                <div><strong>gmaps-tour-dispatch</strong><small>9 compressed apexes</small></div>
+              </div>
+            </div>
+            <div>
+              <div class="mock-sidebar-title">pipeline stages</div>
+              <div class="mock-item active">
+                <span class="mock-dot dot-working"></span>
+                <div><strong>osmnx-ingester</strong><small>active &bull; 4,281 edges</small></div>
+              </div>
+              <div class="mock-item">
+                <span class="mock-dot dot-done"></span>
+                <div><strong>curvature-scorer</strong><small>done &bull; heading variance</small></div>
+              </div>
+              <div class="mock-item">
+                <span class="mock-dot dot-done"></span>
+                <div><strong>gpx-kml-exporter</strong><small>ready &bull; 3 files written</small></div>
+              </div>
+            </div>
+          </aside>
+
+          <section class="mock-main">
+            <div class="mock-tabs">
+              <span class="mock-tab active" id="tab-btn-cli" onclick="switchMockTab('cli')">route-analysis</span>
+              <span class="mock-tab" id="tab-btn-gpx" onclick="switchMockTab('gpx')">discovered_routes.gpx</span>
+              <span class="mock-tab" id="tab-btn-dispatch" onclick="switchMockTab('dispatch')">google-maps-tour.url</span>
+            </div>
+
+            <!-- Pane 1: Route Analysis -->
+            <div class="mock-terminal-pane" id="pane-cli">
+              <div class="tui-line"><span class="tui-prompt">&gt;</span> FindRoads Engine &middot; Route Discovery Report: "Warwick, NY" (15mi radius)</div>
+              <div class="tui-line tui-dim">[Road Discovery Engine] Analyzing highway network topology...</div>
+              <div class="tui-line tui-dim">[Query] Processed 'Town of Warwick, NY' &plus; 15.0km search envelope</div>
+              <div class="tui-line">[Ingest] <span class="tui-green">&check;</span> Extracted 4,281 highway edges. Excluded motorways &amp; stop-and-go alleys.</div>
+              <div class="tui-line">[Scorer] Evaluating sinuosity, heading variance &Delta;&theta;, and speed profile...</div>
+              <div class="tui-line">[Ranker] Filtered &amp; stitched <span class="tui-yellow">20 continuous enthusiast corridors</span>.</div>
+              <div class="tui-line tui-dim">&nbsp;&nbsp;&bull; Route #1: 18.5 km &bull; Sinuosity 78.4 &bull; Elevation &plus;320m</div>
+              <div class="tui-line tui-dim">&nbsp;&nbsp;&bull; Route #2: 12.2 km &bull; Sinuosity 84.1 &bull; Mountain ridge switchbacks</div>
+              <div class="tui-line">[Export] <span class="tui-green">&check;</span> Written: discovered_routes.geojson</div>
+              <div class="tui-line">[Export] <span class="tui-green">&check;</span> Written: discovered_routes.gpx (InRoute, Scenic, Garmin, Kurviger)</div>
+              <div class="tui-line">[Export] <span class="tui-green">&check;</span> Written: discovered_routes.kml (Google My Maps overlay)</div>
+              <div class="tui-line">[Dispatch] <span class="tui-purple">&check;</span> Generated 9-waypoint compressed Google Maps navigation loop!</div>
+              <br/>
+              <div class="tui-line"><span class="tui-green">&bull; Route Discovery Complete</span> in 4.12s. Commercial GPS &amp; Maps sync active.</div>
+            </div>
+
+            <!-- Pane 2: GPX Preview -->
+            <div class="mock-terminal-pane" id="pane-gpx" style="display:none;">
+              <div class="tui-line tui-dim">&lt;?xml version="1.0" encoding="UTF-8"?&gt;</div>
+              <div class="tui-line">&lt;gpx version="1.1" creator="RoadDiscoveryEngine" xmlns="http://www.topografix.com/GPX/1/1"&gt;</div>
+              <div class="tui-line">&nbsp;&nbsp;&lt;metadata&gt;&lt;name&gt;Discovered Enthusiast Routes - Warwick, NY&lt;/name&gt;&lt;/metadata&gt;</div>
+              <div class="tui-line">&nbsp;&nbsp;&lt;trk&gt;</div>
+              <div class="tui-line">&nbsp;&nbsp;&nbsp;&nbsp;&lt;name&gt;Warwick Ridge Mountain Pass #1&lt;/name&gt;</div>
+              <div class="tui-line">&nbsp;&nbsp;&nbsp;&nbsp;&lt;desc&gt;Length: 18.5 km &bull; Sinuosity: 78.4/100 &bull; High curvature&lt;/desc&gt;</div>
+              <div class="tui-line">&nbsp;&nbsp;&nbsp;&nbsp;&lt;trkseg&gt;</div>
+              <div class="tui-line tui-cyan">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;trkpt lat="41.205036" lon="-74.242754"&gt;&lt;ele&gt;241.2&lt;/ele&gt;&lt;/trkpt&gt;</div>
+              <div class="tui-line tui-cyan">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;trkpt lat="41.205812" lon="-74.243510"&gt;&lt;ele&gt;253.8&lt;/ele&gt;&lt;/trkpt&gt;</div>
+              <div class="tui-line tui-cyan">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;trkpt lat="41.207617" lon="-74.246194"&gt;&lt;ele&gt;268.0&lt;/ele&gt;&lt;/trkpt&gt;</div>
+              <div class="tui-line tui-dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;!-- 418 high-precision coordinate points preserving every apex --&gt;</div>
+              <div class="tui-line">&nbsp;&nbsp;&nbsp;&nbsp;&lt;/trkseg&gt;</div>
+              <div class="tui-line">&nbsp;&nbsp;&lt;/trk&gt;</div>
+              <div class="tui-line">&lt;/gpx&gt;</div>
+            </div>
+
+            <!-- Pane 3: Dispatch Preview -->
+            <div class="mock-terminal-pane" id="pane-dispatch" style="display:none;">
+              <div class="tui-line tui-dim">// Google Maps 1-Click Compressed Waypoint Dispatch URL</div>
+              <div class="tui-line tui-dim">// Google Maps limits URL routes to origin + destination + max 9 waypoints</div>
+              <br/>
+              <div class="tui-line tui-purple">https://www.google.com/maps/dir/?api=1</div>
+              <div class="tui-line">&nbsp;&nbsp;&amp;origin=41.205036%2C-74.242754 <span class="tui-dim">(Ridge Entry)</span></div>
+              <div class="tui-line">&nbsp;&nbsp;&amp;destination=41.296416%2C-74.462541 <span class="tui-dim">(Valley Finish)</span></div>
+              <div class="tui-line">&nbsp;&nbsp;&amp;travelmode=driving</div>
+              <div class="tui-line">&nbsp;&nbsp;&amp;waypoints=</div>
+              <div class="tui-line tui-yellow">&nbsp;&nbsp;&nbsp;&nbsp;41.249414%2C-74.36154|41.25485%2C-74.307796|41.265185%2C-74.428661|</div>
+              <div class="tui-line tui-yellow">&nbsp;&nbsp;&nbsp;&nbsp;41.213645%2C-74.297465|41.182507%2C-74.320656|41.207617%2C-74.387094|41.331991%2C-74.356828</div>
+              <br/>
+              <div class="tui-line"><span class="tui-green">&check; Validated</span> Forces Google navigation down the winding passes without taking highway detours.</div>
+            </div>
+          </section>
+        </div>
+      </div>
+      <p class="figcap">
+        Pure OSM vector geometry. <b>Every turnpoint and hairpin is calculated directly from spatial curvature and heading variance.</b>
+      </p>
+    </section>
+
+    <!-- Router Capability Rows (.caps) -->
+    <div class="caps" id="methods">
+
+      <!-- Method 01: 1-Click Google Maps & Apple Maps -->
+      <article class="cap">
+        <div class="n">
+          <span>01</span>
+        </div>
+        <div class="cap-in">
+          <h3>1-Click Google &amp; Apple Maps Navigation <b class="arw">&rarr;</b></h3>
+          <p>
+            Standard navigation apps default to the fastest, straightest highway. Our engine uses strategic waypoint compression to force Google Maps and Apple Maps down the discovered curvy corridors without exceeding URL limits.
+          </p>
+          <ol class="steps-list">
+            <li><b>Click the button:</b> The link below automatically encodes the origin, destination, and key ridge apexes into Google Maps.</li>
+            <li><b>Inspect the route:</b> Notice how the route hugs the winding curves instead of jumping on Route 17 or the Interstate.</li>
+            <li><b>Tap "Start Navigation":</b> Stream directly to your car's dashboard via <b>Apple CarPlay</b> or <b>Android Auto</b>.</li>
+          </ol>
+          <div class="cap-actions">
+            <a class="btn-action-primary" href="https://www.google.com/maps/dir/?api=1&origin=41.205036%2C-74.242754&destination=41.296416%2C-74.462541&travelmode=driving&waypoints=41.249414%2C-74.36154%7C41.25485%2C-74.307796%7C41.265185%2C-74.428661%7C41.213645%2C-74.297465%7C41.182507%2C-74.320656%7C41.207617%2C-74.387094%7C41.331991%2C-74.356828" target="_blank" rel="noopener">
+              <svg style="width:14px;height:14px;fill:currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+              Open Warwick Tour in Google Maps &rarr;
+            </a>
+            <a class="btn-action-secondary" href="index.html">
+              View on Map
+            </a>
+          </div>
+        </div>
+        <div class="ev" aria-hidden="true">
+          <div class="ev-row"><span>format</span><b>google-maps-url</b></div>
+          <div class="ev-row"><span>waypoints</span><b>9 apexes (compressed)</b></div>
+          <div class="ev-row"><span>carplay</span><b><i class="beat"></i>supported</b></div>
+          <div class="ev-row"><span>android-auto</span><b><i class="beat"></i>supported</b></div>
+          <div class="ev-code">
+            origin: 41.2050, -74.2427<br/>
+            dest: 41.2964, -74.4625<br/>
+            dispatch: 1-click turn-by-turn
+          </div>
+        </div>
+      </article>
+
+      <!-- Method 02: Dedicated GPX Navigation (InRoute / Kurviger / Scenic) -->
+      <article class="cap">
+        <div class="n">
+          <span>02</span>
+        </div>
+        <div class="cap-in">
+          <h3>Garmin, InRoute, Scenic &amp; Kurviger GPX Import <b class="arw">&rarr;</b></h3>
+          <p>
+            For serious sports car runs and motorcycle rides, dedicated navigation apps follow your route coordinate-for-coordinate without rerouting you when you pass an exit.
+          </p>
+          <ol class="steps-list">
+            <li><b>Download the GPX file:</b> Click the download button below to save <code>discovered_routes.gpx</code>.</li>
+            <li><b>AirDrop or Send to Phone:</b> Open the file with <b>inRoute</b> (iOS), <b>Kurviger</b> (Android), or <b>Scenic</b>.</li>
+            <li><b>Lock Navigation:</b> The app displays full elevation graphs, corner radius warnings, and feeds turn-by-turn navigation straight to CarPlay or your cockpit mount.</li>
+          </ol>
+          <div class="cap-actions">
+            <a class="btn-action-primary" href="discovered_routes.gpx" download="warwick_curvy_routes.gpx">
+              <svg style="width:14px;height:14px;fill:currentColor" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              Download discovered_routes.gpx (GPS)
+            </a>
+            <a class="btn-action-secondary" href="#apps">
+              Browse Compatible Apps &darr;
+            </a>
+          </div>
+        </div>
+        <div class="ev" aria-hidden="true">
+          <div class="ev-row"><span>format</span><b>standard-gpx-1.1</b></div>
+          <div class="ev-row"><span>trackpoints</span><b>418 high-precision</b></div>
+          <div class="ev-row"><span>elevation</span><b>included (&Delta;h 320m)</b></div>
+          <div class="ev-row"><span>offline-gps</span><b><i class="beat"></i>ready</b></div>
+          <div class="ev-code">
+            compatible: inRoute, Kurviger, Scenic, OsmAnd, Garmin Zumo, BMW Navigator
+          </div>
+        </div>
+      </article>
+
+      <!-- Method 03: Permanent Google My Maps Overlay -->
+      <article class="cap">
+        <div class="n">
+          <span>03</span>
+        </div>
+        <div class="cap-in">
+          <h3>Permanent Google My Maps Cloud Overlay <b class="arw">&rarr;</b></h3>
+          <p>
+            Want all 20 roads permanently visible directly inside the official Google Maps app on your iPhone or Android? Import the generated KML file into Google My Maps once, and it syncs to your Google account forever.
+          </p>
+          <ol class="steps-list">
+            <li><b>Download the KML file:</b> Save <code>discovered_routes.kml</code> below.</li>
+            <li><b>Open Google My Maps:</b> Go to <a href="https://www.google.com/maps/d/" target="_blank" rel="noopener" style="color:var(--spot);text-decoration:underline;">google.com/maps/d</a> in your browser and click <b>Create a New Map</b>.</li>
+            <li><b>Import Layer:</b> Click the <b>Import</b> button under the untitled layer and drag &amp; drop your KML file.</li>
+            <li><b>View in Mobile App:</b> Open the Google Maps app on your phone, tap <b>Saved &rarr; Maps</b>, and select your imported map. The twisty roads glow on your map as you drive!</li>
+          </ol>
+          <div class="cap-actions">
+            <a class="btn-action-primary" href="discovered_routes.kml" download="warwick_curvy_routes.kml">
+              <svg style="width:14px;height:14px;fill:currentColor" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              Download discovered_routes.kml
+            </a>
+            <a class="btn-action-secondary" href="https://www.google.com/maps/d/" target="_blank" rel="noopener">
+              Open Google My Maps &nearr;
+            </a>
+          </div>
+        </div>
+        <div class="ev" aria-hidden="true">
+          <div class="ev-row"><span>format</span><b>keyhole-markup-kml</b></div>
+          <div class="ev-row"><span>storage</span><b>google cloud account</b></div>
+          <div class="ev-row"><span>mobile-app</span><b>google maps (saved)</b></div>
+          <div class="ev-row"><span>persistence</span><b><i class="beat"></i>permanent</b></div>
+          <div class="ev-code">
+            sync: mobile &bull; desktop &bull; carplay<br/>
+            color-coded by sinuosity
+          </div>
+        </div>
+      </article>
+
+    </div>
+
+    <!-- Supported Apps Ecosystem Grid -->
+    <section class="ph" id="apps">
+      <div class="ph-split">
+        <div>
+          <div class="hd-eyebrow"><s></s> verified driver tools</div>
+          <h2>Compatible Navigation Apps</h2>
+          <p>
+            Download proven navigation tools for iOS, Android, and Apple CarPlay. Each app below has been tested with our exported GPX coordinates and waypoint dispatches.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Search & Filter Controls -->
+    <div class="plugins-controls">
+      <div class="plugins-search-wrap">
+        <span class="plugins-search-icon">&telrec;</span>
+        <input 
+          type="text" 
+          class="plugins-search" 
+          id="app-filter" 
+          placeholder="Filter apps (e.g. ios, carplay, android, gpx)..."
+          oninput="filterApps()"
+        />
+      </div>
+    </div>
+
+    <!-- Cards Grid -->
+    <div class="plugins-grid" id="apps-grid">
+
+      <!-- inRoute -->
+      <article class="plugin-card" data-tags="ios carplay gpx offline curvy">
+        <div class="plugin-card-head">
+          <div class="plugin-title">
+            <span class="plugin-owner">CarPlay &bull;</span>
+            <span class="plugin-name">inRoute</span>
+          </div>
+          <span class="plugin-badge-pill">Recommended</span>
+        </div>
+        <div class="plugin-desc">
+          The undisputed gold standard for driving enthusiasts on iOS. Imports full GPX tracks, plots elevation profiles, and provides turn-by-turn routing directly on Apple CarPlay.
+        </div>
+        <div class="plugin-meta-row">
+          <a class="store-btn" href="https://apps.apple.com/us/app/inroute-intelligent-routing/id700399788" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.36c.62-.75 1.04-1.8 0.93-2.85-.9.04-1.99.6-2.63 1.35-.57.65-1.07 1.72-.94 2.74 1 .08 2.02-.49 2.64-1.24z"/></svg>
+            App Store (iOS)
+          </a>
+          <span style="color:var(--faint2);font-size:11px;font-family:var(--mono);">CarPlay &bull; GPX Import</span>
+        </div>
+      </article>
+
+      <!-- Kurviger -->
+      <article class="plugin-card" data-tags="ios android web gpx curvy motorcycle">
+        <div class="plugin-card-head">
+          <div class="plugin-title">
+            <span class="plugin-owner">iOS &bull; Android &bull; Web &bull;</span>
+            <span class="plugin-name">Kurviger</span>
+          </div>
+          <span class="plugin-badge-pill">Curvature Engine</span>
+        </div>
+        <div class="plugin-desc">
+          Renowned routing software engineered specifically for winding mountain roads. Easily imports our GPX files and calculates custom scenic sweepers with zero highway bias.
+        </div>
+        <div class="plugin-meta-row">
+          <a class="store-btn" href="https://apps.apple.com/us/app/kurviger-motorcycle-navigation/id6449955523" target="_blank" rel="noopener">App Store (iOS)</a>
+          <a class="store-btn" href="https://play.google.com/store/apps/details?id=com.kurviger.app" target="_blank" rel="noopener">Google Play (Android)</a>
+          <a class="store-btn" href="https://kurviger.com" target="_blank" rel="noopener">Web Studio &nearr;</a>
+        </div>
+      </article>
+
+
+      <!-- Scenic Navigation -->
+      <article class="plugin-card" data-tags="ios carplay gpx motorcycle">
+        <div class="plugin-card-head">
+          <div class="plugin-title">
+            <span class="plugin-owner">iOS &bull;</span>
+            <span class="plugin-name">Scenic Navigation</span>
+          </div>
+          <span class="plugin-badge-pill">Tour Specialist</span>
+        </div>
+        <div class="plugin-desc">
+          Dedicated motorcycle and sports car navigation app for iOS. Supports offline vector maps, 1-click GPX imports, and custom curvature optimization.
+        </div>
+        <div class="plugin-meta-row">
+          <a class="store-btn" href="https://apps.apple.com/us/app/scenic-motorcycle-navigation/id1089668246" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.36c.62-.75 1.04-1.8 0.93-2.85-.9.04-1.99.6-2.63 1.35-.57.65-1.07 1.72-.94 2.74 1 .08 2.02-.49 2.64-1.24z"/></svg>
+            App Store (iOS)
+          </a>
+          <span style="color:var(--faint2);font-size:11px;font-family:var(--mono);">CarPlay Enabled</span>
+        </div>
+      </article>
+
+      <!-- OsmAnd Maps -->
+      <article class="plugin-card" data-tags="ios android gpx offline openstreetmap">
+        <div class="plugin-card-head">
+          <div class="plugin-title">
+            <span class="plugin-owner">Open-Source &bull;</span>
+            <span class="plugin-name">OsmAnd Maps</span>
+          </div>
+          <span class="plugin-badge-pill">True Offline</span>
+        </div>
+        <div class="plugin-desc">
+          Full-featured open-source GPS application built directly on OpenStreetMap. Completely offline routing with exact GPX track following and elevation contour lines.
+        </div>
+        <div class="plugin-meta-row">
+          <a class="store-btn" href="https://apps.apple.com/us/app/osmand-maps-travel-navigate/id847713704" target="_blank" rel="noopener">App Store (iOS)</a>
+          <a class="store-btn" href="https://play.google.com/store/apps/details?id=net.osmand" target="_blank" rel="noopener">Google Play (Android)</a>
+        </div>
+      </article>
+
+      <!-- Google Maps -->
+      <article class="plugin-card" data-tags="ios android web auto 1-click">
+        <div class="plugin-card-head">
+          <div class="plugin-title">
+            <span class="plugin-owner">Standard &bull;</span>
+            <span class="plugin-name">Google Maps</span>
+          </div>
+          <span class="plugin-badge-pill">1-Click URL</span>
+        </div>
+        <div class="plugin-desc">
+          Universal turn-by-turn navigation already installed on every phone. Launches instantly via our compressed 9-waypoint URLs with full live traffic integration.
+        </div>
+        <div class="plugin-meta-row">
+          <a class="store-btn" href="https://apps.apple.com/us/app/google-maps/id585027354" target="_blank" rel="noopener">App Store (iOS)</a>
+          <a class="store-btn" href="https://play.google.com/store/apps/details?id=com.google.android.apps.maps" target="_blank" rel="noopener">Google Play (Android)</a>
+        </div>
+      </article>
+
+      <!-- Google My Maps -->
+      <article class="plugin-card" data-tags="web android kml overlay cloud">
+        <div class="plugin-card-head">
+          <div class="plugin-title">
+            <span class="plugin-owner">Cloud Sync &bull;</span>
+            <span class="plugin-name">Google My Maps</span>
+          </div>
+          <span class="plugin-badge-pill">KML Overlay</span>
+        </div>
+        <div class="plugin-desc">
+          Store customized driving routes and pass markers permanently in your Google account. Shows up as a permanent toggleable layer inside the Google Maps mobile app under Saved &rarr; Maps.
+        </div>
+        <div class="plugin-meta-row">
+          <a class="store-btn" href="https://www.google.com/maps/d/" target="_blank" rel="noopener">My Maps Web Studio &nearr;</a>
+        </div>
+      </article>
+
+      <!-- Calimoto -->
+      <article class="plugin-card" data-tags="ios android web gpx curvy motorcycle">
+        <div class="plugin-card-head">
+          <div class="plugin-title">
+            <span class="plugin-owner">Twisty GPS &bull;</span>
+            <span class="plugin-name">Calimoto</span>
+          </div>
+          <span class="plugin-badge-pill">Winding Algorithm</span>
+        </div>
+        <div class="plugin-desc">
+          Popular winding road navigation app featuring custom twisty route calculation, GPX track imports, and turn-by-turn voice guidance for sports cars and bikes.
+        </div>
+        <div class="plugin-meta-row">
+          <a class="store-btn" href="https://apps.apple.com/app/calimoto-motorcycle-navigation/id1216023326" target="_blank" rel="noopener">App Store (iOS)</a>
+          <a class="store-btn" href="https://play.google.com/store/apps/details?id=com.calimoto.android" target="_blank" rel="noopener">Google Play (Android)</a>
+          <a class="store-btn" href="https://calimoto.com" target="_blank" rel="noopener">Web Studio &nearr;</a>
+        </div>
+      </article>
+
+      <!-- REVER -->
+      <article class="plugin-card" data-tags="ios android web gpx offline track">
+        <div class="plugin-card-head">
+          <div class="plugin-title">
+            <span class="plugin-owner">Enthusiast GPS &bull;</span>
+            <span class="plugin-name">REVER Motorcycle &amp; Car GPS</span>
+          </div>
+          <span class="plugin-badge-pill">Track Recorder</span>
+        </div>
+        <div class="plugin-desc">
+          Built for motorsport and driving enthusiasts. Supports custom GPX route imports, offline maps, live tracking, and elevation analysis.
+        </div>
+        <div class="plugin-meta-row">
+          <a class="store-btn" href="https://apps.apple.com/us/app/rever-motorcycle-gps-rides/id969248479" target="_blank" rel="noopener">App Store (iOS)</a>
+          <a class="store-btn" href="https://play.google.com/store/apps/details?id=com.rever.android" target="_blank" rel="noopener">Google Play (Android)</a>
+          <a class="store-btn" href="https://www.rever.co/" target="_blank" rel="noopener">Web Studio &nearr;</a>
+        </div>
+      </article>
+
+      <!-- Garmin Explore -->
+      <article class="plugin-card" data-tags="ios android web gpx garmin offline">
+        <div class="plugin-card-head">
+          <div class="plugin-title">
+            <span class="plugin-owner">Garmin &bull;</span>
+            <span class="plugin-name">Garmin Explore / Tread</span>
+          </div>
+          <span class="plugin-badge-pill">Hardware Sync</span>
+        </div>
+        <div class="plugin-desc">
+          Syncs our exported GPX files directly to Garmin Zūmo, Tread, and automotive GPS units via Bluetooth. Complete offline topographic and satellite map support.
+        </div>
+        <div class="plugin-meta-row">
+          <a class="store-btn" href="https://apps.apple.com/us/app/garmin-explore/id1290640954" target="_blank" rel="noopener">App Store (iOS)</a>
+          <a class="store-btn" href="https://play.google.com/store/apps/details?id=com.garmin.android.apps.explore" target="_blank" rel="noopener">Google Play (Android)</a>
+          <a class="store-btn" href="https://explore.garmin.com/" target="_blank" rel="noopener">Web Portal &nearr;</a>
+        </div>
+      </article>
+
+
+    </div>
+
+
+    <!-- Bottom Action CTA (.end) -->
+    <section class="end">
+      <div class="in">
+        <h2>Give them somewhere to drive.</h2>
+        <p>
+          Generate curvy enthusiast routes anywhere in the world. Export straight to your dashboard or view the interactive map.
+        </p>
+        <div class="download-pills">
+          <a class="btn-action-primary" href="index.html">
+            &larr; Open Interactive Map
+          </a>
+          <a class="btn-action-secondary" href="discovered_routes.gpx" download="warwick_curvy_routes.gpx">
+            Download GPX
+          </a>
+          <a class="btn-action-secondary" href="discovered_routes.kml" download="warwick_curvy_routes.kml">
+            Download KML
+          </a>
+          <a class="btn-action-secondary" href="discovered_routes.geojson" download="warwick_curvy_routes.geojson">
+            Download GeoJSON
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div>
+        <b>findroads v0.2.0</b> &mdash; Built with OpenStreetMap &amp; OSMnx.
+      </div>
+      <div>
+        <a href="/">Interactive Map</a> &nbsp;&bull;&nbsp; 
+        <a href="/navigation_guide.html">Scoring Guide</a> &nbsp;&bull;&nbsp; 
+        <a href="#apps">Supported Apps</a> &nbsp;&bull;&nbsp; 
+        <a href="/#presets">Presets</a> &nbsp;&bull;&nbsp; 
+        <a href="/#faq">FAQ</a>
+      </div>
+    </footer>
+
+  </div>
+
+  <script>
+    /* Mobile Sheet Menu */
+    (function () {
+      var btn = document.getElementById("nav-menu");
+      var sheet = document.getElementById("nav-sheet");
+      if (!btn || !sheet) return;
+      function set(open) {
+        sheet.classList.toggle("open", open);
+        btn.setAttribute("aria-expanded", String(open));
+      }
+      btn.addEventListener("click", function (event) {
+        event.stopPropagation();
+        set(!sheet.classList.contains("open"));
+      });
+      document.addEventListener("click", function (event) {
+        if (!sheet.contains(event.target)) set(false);
+      });
+    })();
+
+    function copyCliCommand() {
+
+      var cmd = "python -m road_discovery.cli --place \"Warwick, NY\" --radius 15";
+      navigator.clipboard.writeText(cmd).then(function() {
+        var btn = document.getElementById("copy-btn");
+        var orig = btn.innerText;
+        btn.innerText = "COPIED!";
+        btn.style.color = "var(--spot)";
+        setTimeout(function() {
+          btn.innerText = orig;
+          btn.style.color = "";
+        }, 2000);
+      });
+    }
+
+    function switchMockTab(tabId) {
+      document.querySelectorAll('.mock-tab').forEach(function(el) { el.classList.remove('active'); });
+      document.querySelectorAll('.mock-terminal-pane').forEach(function(el) { el.style.display = 'none'; });
+
+      if (tabId === 'cli') {
+        document.getElementById('tab-btn-cli').classList.add('active');
+        document.getElementById('pane-cli').style.display = 'block';
+      } else if (tabId === 'gpx') {
+        document.getElementById('tab-btn-gpx').classList.add('active');
+        document.getElementById('pane-gpx').style.display = 'block';
+      } else if (tabId === 'dispatch') {
+        document.getElementById('tab-btn-dispatch').classList.add('active');
+        document.getElementById('pane-dispatch').style.display = 'block';
+      }
+    }
+
+    function filterApps() {
+      var q = document.getElementById('app-filter').value.toLowerCase().trim();
+      var cards = document.querySelectorAll('#apps-grid .plugin-card');
+      cards.forEach(function(card) {
+        var text = (card.innerText + " " + (card.getAttribute('data-tags') || "")).toLowerCase();
+        if (!q || text.indexOf(q) !== -1) {
+          card.style.display = "flex";
+        } else {
+          card.style.display = "none";
+        }
+      });
+    }
+  </script>
+</body>
+</html>

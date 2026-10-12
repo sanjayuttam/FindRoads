@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "road-discovery"
+version = "0.1.0"
+description = "Algorithmic road discovery engine ranking the best enthusiast driving roads."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "osmnx>=2.0.0",
+    "geopandas>=1.0.0",
+    "shapely>=2.0.0",
+    "networkx>=3.0",
+    "scipy>=1.10.0",
+    "matplotlib>=3.7.0"
+]
+
+[project.scripts]
+find-roads = "road_discovery.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["road_discovery*"]
+exclude = ["cache*", "tests*", "examples*"]

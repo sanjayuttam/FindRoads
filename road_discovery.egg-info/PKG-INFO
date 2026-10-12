@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: road-discovery
+Version: 0.1.0
+Summary: Algorithmic road discovery engine ranking the best enthusiast driving roads.
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: osmnx>=2.0.0
+Requires-Dist: geopandas>=1.0.0
+Requires-Dist: shapely>=2.0.0
+Requires-Dist: networkx>=3.0
+Requires-Dist: scipy>=1.10.0
+Requires-Dist: matplotlib>=3.7.0
+
+# Road Discovery Engine
+
+Algorithmic road discovery and ranking engine for sports cars and driving enthusiasts. Ingests OpenStreetMap network data, computes geometric sinuosity and angular twistiness, filters speed profiles and traffic density, stitches contiguous routes, and exports GeoJSON ready for web mapping.

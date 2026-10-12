@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>Road Discovery Engine &bull; Driving Enthusiast Routes</title>
+  
+  <!-- Herdr Fonts: Archivo, Inter, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <style>
+    :root {
+      --bg: #0c0c0b;
+      --bg-elevated: #141413;
+      --bg-panel: rgba(18, 18, 17, 0.94);
+      --ink: #f0ece0;
+      --ink-soft: #c8c5bc;
+      --muted: #75756e;
+      --muted-2: #4a4a45;
+      --line: #22221f;
+      --line-strong: #30302c;
+      --accent: #4a9eff;
+      --accent-soft: rgba(74, 158, 255, 0.12);
+      --green: #52c97a;
+      --green-soft: rgba(82, 201, 122, 0.12);
+      --yellow: #e6b84a;
+      --yellow-soft: rgba(230, 184, 74, 0.12);
+      --red: #e05a5a;
+      --red-soft: rgba(224, 90, 90, 0.12);
+      --radius-lg: 6px;
+      --radius-md: 4px;
+      --radius-sm: 2px;
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --body: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+      --heading: Archivo, Inter, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: var(--body);
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.5;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    #map {
+      position: absolute;
+      top: 56px;
+      bottom: 0;
+      width: 100%;
+      background: #080807;
+    }
+
+    /* Herdr Header Bar */
+    header.hd-nav {
+      height: 56px;
+      background: rgba(12, 12, 11, 0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      z-index: 1000;
+      position: relative;
+    }
+
+    .brand-lockup {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-title {
+      font-family: var(--heading);
+      font-weight: 900;
+      font-size: 1.15rem;
+      letter-spacing: -0.03em;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+    }
+
+    .brand-title span.tag {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-soft);
+      border: 1px solid rgba(74, 158, 255, 0.3);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    #status-badge {
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      background: var(--bg-elevated);
+      color: var(--green);
+      border: 1px solid var(--line);
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    #status-badge::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+    }
+
+    /* Address Discovery Search Bar */
+    .search-form {
+      display: flex;
+      align-items: center;
+      flex: 1;
+      max-width: 520px;
+      margin: 0 16px;
+    }
+
+    .search-input-wrap {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      background: #111110;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      height: 34px;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .search-input-wrap:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+
+    .search-ico {
+      padding: 0 8px 0 10px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      user-select: none;
+      display: flex;
+      align-items: center;
+    }
+
+    #address-input {
+      flex: 1;
+      background: transparent;
+      border: 0;
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      padding: 0 6px;
+      outline: none;
+      min-width: 0;
+      height: 100%;
+    }
+
+    #address-input::placeholder {
+      color: var(--muted);
+    }
+
+    #radius-select {
+      background: #181816;
+      border: 0;
+      border-left: 1px solid var(--line-strong);
+      color: var(--ink-soft);
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      padding: 0 8px;
+      height: 100%;
+      border-radius: 0;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .hd-btn-discover {
+      background: var(--accent);
+      color: #0c0c0b;
+      font-family: var(--mono);
+      font-weight: 700;
+      font-size: 0.78rem;
+      border: 0;
+      border-radius: 0;
+      padding: 0 14px;
+      height: 100%;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      transition: background 0.15s ease;
+    }
+
+    .hd-btn-discover:hover {
+      background: #74b4ff;
+    }
+
+    .hd-btn-discover:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    /* Floating Toast */
+    .discovery-toast {
+      position: absolute;
+      top: 68px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(18, 18, 17, 0.95);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--accent);
+      box-shadow: 0 16px 44px rgba(0,0,0,0.8);
+      border-radius: var(--radius-md);
+      padding: 12px 20px;
+      z-index: 2500;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--ink);
+      max-width: 90vw;
+    }
+
+    .toast-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(74, 158, 255, 0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Herdr Input / Button styling */
+    select, button, .hd-btn {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      background: var(--bg-elevated);
+      color: var(--ink-soft);
+      border: 1px solid var(--line);
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      text-decoration: none;
+      height: 32px;
+    }
+
+    select:hover, button:hover, .hd-btn:hover {
+      background: #1c1c1a;
+      border-color: var(--line-strong);
+      color: var(--ink);
+    }
+
+    select {
+      outline: none;
+      padding-right: 24px;
+    }
+
+    .hd-btn-primary {
+      background: var(--accent);
+      color: #0c0c0b !important;
+      font-weight: 700;
+      border-color: var(--accent);
+    }
+
+    .hd-btn-primary:hover {
+      background: #6ab0ff !important;
+      border-color: #6ab0ff !important;
+    }
+
+    .hd-btn-green {
+      color: var(--green);
+      background: var(--green-soft);
+      border-color: rgba(82, 201, 122, 0.35);
+      font-weight: 600;
+    }
+
+    .hd-btn-green:hover {
+      background: rgba(82, 201, 122, 0.22);
+      border-color: var(--green);
+      color: #fff;
+    }
+
+    .hd-btn-yellow {
+      color: var(--yellow);
+      background: var(--yellow-soft);
+      border-color: rgba(230, 184, 74, 0.35);
+      font-weight: 600;
+    }
+
+    .hd-btn-yellow:hover {
+      background: rgba(230, 184, 74, 0.22);
+      border-color: var(--yellow);
+      color: #fff;
+    }
+
+    .file-input-wrapper {
+      position: relative;
+      overflow: hidden;
+      display: inline-block;
+    }
+
+    .file-input-wrapper input[type=file] {
+      position: absolute;
+      left: 0;
+      top: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Dark-mode filter on free OpenStreetMap tiles - 0 watermarks */
+    .dark-tiles {
+      filter: brightness(0.55) invert(1) contrast(2.8) hue-rotate(200deg) saturate(0.25) brightness(0.65);
+    }
+
+    /* Herdr Floating Legend */
+    .legend {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(12px);
+      padding: 12px 16px;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      z-index: 1000;
+      font-family: var(--mono);
+      font-size: 0.76rem;
+      line-height: 1.7;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+
+    .legend-title {
+      font-family: var(--heading);
+      font-weight: 800;
+      font-size: 0.8rem;
+      color: var(--ink);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 4px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink-soft);
+    }
+
+    .color-box {
+      width: 14px;
+      height: 4px;
+      border-radius: 1px;
+    }
+
+    /* Herdr Styled Leaflet Popups */
+    .leaflet-popup-content-wrapper {
+      background: #111110;
+      color: var(--ink);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line-strong);
+      box-shadow: 0 14px 35px rgba(0,0,0,0.7);
+      padding: 4px;
+    }
+
+    .leaflet-popup-tip {
+      background: #111110;
+      border: 1px solid var(--line-strong);
+    }
+
+    .popup-title {
+      font-family: var(--heading);
+      font-size: 1rem;
+      font-weight: 800;
+      color: var(--ink);
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 6px;
+    }
+
+    .popup-metric {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      gap: 16px;
+      color: var(--muted);
+    }
+
+    .popup-metric span:first-child {
+      color: var(--ink-soft);
+    }
+
+    .popup-val {
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    /* Leaflet Layer Controls */
+    .leaflet-control-layers {
+      background: var(--bg-panel) !important;
+      border: 1px solid var(--line) !important;
+      border-radius: var(--radius-lg) !important;
+      color: var(--ink) !important;
+      font-family: var(--mono) !important;
+      font-size: 0.78rem !important;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5) !important;
+    }
+
+    .leaflet-control-layers-base label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 4px 0;
+      cursor: pointer;
+    }
+
+    /* Herdr Navigation Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(8, 8, 7, 0.85);
+      backdrop-filter: blur(8px);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .modal-content {
+      background: #0f0f0e;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      max-width: 820px;
+      width: 100%;
+      max-height: 85vh;
+      overflow-y: auto;
+      padding: 30px;
+      position: relative;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+      color: var(--ink);
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      color: var(--ink-soft);
+      font-size: 1.1rem;
+      border-radius: var(--radius-md);
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+    .modal-close:hover {
+      background: var(--red-soft);
+      color: var(--red);
+      border-color: var(--red);
+    }
+
+    .hd-card {
+      background: #141413;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+
+    .hd-eyebrow {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .hd-eyebrow s {
+      display: inline-block;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      text-decoration: none;
+    }
+
+    .app-card-sm {
+      background: #0c0c0b;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .store-tag {
+      font-family: var(--mono);
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      color: var(--ink);
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      font-size: 0.74rem;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+
+    .store-tag:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HERDR-STYLED NAVBAR -->
+  <header class="hd-nav">
+    <div class="brand-lockup">
+      <a href="/" class="brand-title">
+        🏎️ FINDROADS <span class="tag">runtime</span>
+      </a>
+      <span id="status-badge">loading...</span>
+    </div>
+
+    <!-- ADDRESS DISCOVERY INPUT -->
+    <form id="discover-form" class="search-form" onsubmit="handleDiscover(event)">
+      <div class="search-input-wrap">
+        <span class="search-ico">📍</span>
+        <input 
+          type="text" 
+          id="address-input" 
+          placeholder="Enter address, town, or landmark (e.g. 'Franklin Lakes, NJ', 'Warwick, NY')..." 
+          required 
+          autocomplete="off"
+        />
+        <select id="radius-select" title="Search radius in miles">
+          <option value="5">5 mi</option>
+          <option value="10">10 mi</option>
+          <option value="15" selected>15 mi</option>
+          <option value="20">20 mi</option>
+          <option value="25">25 mi</option>
+        </select>
+        <button type="submit" id="discover-btn" class="hd-btn-discover">
+          <span class="btn-text">⚡ Discover Roads</span>
+          <span class="btn-spinner" style="display:none;">⏳ Ingesting...</span>
+        </button>
+      </div>
+    </form>
+
+    <div class="controls">
+      <select id="geojson-select" title="Switch road data preset">
+        <option value="discovered_routes.geojson" selected>discovered_routes.geojson</option>
+        <option value="tail_of_the_dragon_routes.geojson">tail_of_the_dragon.geojson</option>
+        <option value="angeles_crest_routes.geojson">angeles_crest.geojson</option>
+      </select>
+
+      <button type="button" id="reload-btn" title="Reload current file from disk">🔄 reload</button>
+
+      <a id="tour-link" href="#" target="_blank" rel="noopener" style="display:none; text-decoration:none;">
+        <button type="button" class="hd-btn-primary">🗺️ gmaps tour</button>
+      </a>
+
+      <a id="gpx-link" href="discovered_routes.gpx" download="discovered_routes.gpx" style="text-decoration:none;">
+        <button type="button" class="hd-btn-green">📥 .gpx track</button>
+      </a>
+
+      <a href="navigation_guide.html" target="_blank" style="text-decoration:none;">
+        <button type="button" id="open-guide-btn" class="hd-btn-yellow">📱 how to drive</button>
+      </a>
+
+      <div class="file-input-wrapper">
+        <button type="button" class="hd-btn">📂 open...</button>
+        <input type="file" id="file-input" accept=".geojson,.json" title="Open GeoJSON file" />
+      </div>
+    </div>
+  </header>
+
+  <!-- DISCOVERY FLOATING TOAST -->
+  <div id="discovery-toast" class="discovery-toast" style="display:none;">
+    <div class="toast-spinner" id="toast-spinner"></div>
+    <div id="toast-icon" style="display:none; font-size:1.1rem;"></div>
+    <div class="toast-text" id="toast-text">Discovering roads...</div>
+  </div>
+
+  <!-- NAVIGATION MODAL (HERDR TERMINAL STYLE) -->
+  <div id="guide-modal" class="modal-overlay">
+    <div class="modal-content">
+      <button class="modal-close" id="close-guide-btn">&times;</button>
+      
+      <div class="hd-eyebrow"><s></s>navigation guide</div>
+      <h2 style="font-family: var(--heading); font-weight: 900; margin-top:0; font-size: 1.5rem; letter-spacing: -0.02em; color:#fff;">
+        Drive & Navigate Discovered Routes
+      </h2>
+      <p style="color:var(--muted); font-size:0.88rem; margin-bottom:24px;">
+        Export formats and mobile workflows to load your discovered mountain routes into live GPS navigation.
+      </p>
+
+      <!-- METHOD 1 -->
+      <div class="hd-card">
+        <div class="hd-eyebrow" style="color:var(--accent);"><s></s>method 1 &bull; instant</div>
+        <div style="font-family: var(--heading); font-weight: 800; font-size: 1.05rem; margin-bottom: 6px;">
+          Direct 1-Click Google Maps Link
+        </div>
+        <p style="font-size:0.85rem; color:var(--ink-soft); margin:0 0 12px 0;">
+          Click any road on this map, then tap <strong>"🗺️ Navigate Road in Google Maps"</strong> in the popup. Google Maps opens with embedded curve waypoints so the navigation engine stays locked to the twisty route.
+        </p>
+        <a id="modal-tour-link" href="#" target="_blank" rel="noopener" class="hd-btn hd-btn-primary" style="display:inline-flex;">
+          🗺️ open connected tour in google maps &rarr;
+        </a>
+      </div>
+
+      <!-- METHOD 2 -->
+      <div class="hd-card">
+        <div class="hd-eyebrow" style="color:var(--red);"><s style="background:var(--red);"></s>method 2 &bull; permanent overlay</div>
+        <div style="font-family: var(--heading); font-weight: 800; font-size: 1.05rem; margin-bottom: 6px;">
+          Google My Maps (Sync to iOS & Android App)
+        </div>
+        <ol style="font-size:0.84rem; color:var(--ink-soft); margin:0; padding-left:18px; line-height:1.7;">
+          <li>Visit <a href="https://www.google.com/mymaps" target="_blank" rel="noopener" style="color:var(--accent); text-decoration:none; font-family:var(--mono);">google.com/mymaps</a> &rarr; <strong>"+ Create a New Map"</strong>.</li>
+          <li>Click <strong>"Import"</strong> &rarr; select <code>discovered_routes.kml</code> from your workspace.</li>
+          <li>Open the <strong>Google Maps app</strong> on your phone &rarr; <strong>Saved</strong> &rarr; <strong>Maps</strong> &rarr; select your map.</li>
+        </ol>
+      </div>
+
+      <!-- METHOD 3 -->
+      <div class="hd-card">
+        <div class="hd-eyebrow" style="color:var(--green);"><s style="background:var(--green);"></s>method 3 &bull; sports car gps apps</div>
+        <div style="font-family: var(--heading); font-weight: 800; font-size: 1.05rem; margin-bottom: 12px;">
+          Curvy Road Navigation Apps (.GPX)
+        </div>
+
+        <!-- inRoute -->
+        <div class="app-card-sm">
+          <div>
+            <strong style="font-family:var(--heading);">🏎️ inRoute Route Planner</strong>
+            <div style="font-family:var(--mono); font-size:0.75rem; color:var(--muted);">iOS &bull; Apple CarPlay &bull; Curviness scoring</div>
+          </div>
+          <a href="https://apps.apple.com/us/app/inroute-intelligent-routing/id703796722" target="_blank" rel="noopener" class="store-tag"> app store</a>
+        </div>
+
+        <!-- Scenic -->
+        <div class="app-card-sm">
+          <div>
+            <strong style="font-family:var(--heading);">🏍️ Scenic Navigation</strong>
+            <div style="font-family:var(--mono); font-size:0.75rem; color:var(--muted);">iOS &bull; Apple CarPlay &bull; Offline twisty maps</div>
+          </div>
+          <a href="https://apps.apple.com/us/app/scenic-motorcycle-navigation/id1089668246" target="_blank" rel="noopener" class="store-tag"> app store</a>
+        </div>
+
+        <!-- Calimoto -->
+        <div class="app-card-sm">
+          <div>
+            <strong style="font-family:var(--heading);">🔄 calimoto - Curvy Roads</strong>
+            <div style="font-family:var(--mono); font-size:0.75rem; color:var(--muted);">iOS & Android &bull; Twisty algorithm</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <a href="https://apps.apple.com/us/app/calimoto-motorcycle-rides/id1200322261" target="_blank" rel="noopener" class="store-tag"> ios</a>
+            <a href="https://play.google.com/store/apps/details?id=com.calimoto.calimoto" target="_blank" rel="noopener" class="store-tag">▶ android</a>
+          </div>
+        </div>
+
+        <!-- OsmAnd -->
+        <div class="app-card-sm">
+          <div>
+            <strong style="font-family:var(--heading);">🌍 OsmAnd Maps</strong>
+            <div style="font-family:var(--mono); font-size:0.75rem; color:var(--muted);">iOS & Android &bull; 100% Offline OpenStreetMap</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <a href="https://apps.apple.com/us/app/osmand-maps-travel-navigate/id934850377" target="_blank" rel="noopener" class="store-tag"> ios</a>
+            <a href="https://play.google.com/store/apps/details?id=net.osmand" target="_blank" rel="noopener" class="store-tag">▶ android</a>
+          </div>
+        </div>
+
+        <!-- Apple Maps -->
+        <div class="app-card-sm">
+          <div>
+            <strong style="font-family:var(--heading);">🍏 Apple Maps (iOS 18+)</strong>
+            <div style="font-family:var(--mono); font-size:0.75rem; color:var(--muted);">AirDrop .gpx track &rarr; open directly in Apple Maps</div>
+          </div>
+          <span style="font-family:var(--mono); font-size:0.72rem; color:var(--muted);">built-in</span>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:20px;">
+        <a href="navigation_guide.html" target="_blank" style="font-family:var(--mono); color:var(--accent); font-size:0.82rem; text-decoration:none;">
+          full documentation page &rarr;
+        </a>
+        <button type="button" id="close-guide-btn-bottom" class="hd-btn">
+          close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- HERDR FLOATING LEGEND -->
+  <div class="legend">
+    <div class="legend-title">Driving Fun Score</div>
+    <div class="legend-item"><div class="color-box" style="background: var(--red);"></div> 75–100 (Legendary Pass)</div>
+    <div class="legend-item"><div class="color-box" style="background: var(--yellow);"></div> 60–74 (Spirited Sweepers)</div>
+    <div class="legend-item"><div class="color-box" style="background: var(--green);"></div> 45–59 (Technical Backroad)</div>
+    <div class="legend-item"><div class="color-box" style="background: var(--accent);"></div> &lt; 45 (Mild Connecting)</div>
+  </div>
+
+  <script>
+    const map = L.map('map').setView([35.48, -83.92], 12);
+
+    // 100% Free Tile Layers (NO API key required)
+    const osmStandard = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+
+    const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, USDA, USGS'
+    });
+
+    const esriTopo = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Tiles &copy; Esri &mdash; USGS, NPS'
+    });
+
+    // Dark styled OSM tile layer (uses CSS filter class, 100% free, no API key)
+    const osmDark = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      className: 'dark-tiles',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+
+    // Default to Dark Mode
+    osmDark.addTo(map);
+
+    // Layer control to switch between map styles
+    const baseMaps = {
+      "🌙 dark mode": osmDark,
+      "🗺️ street map": osmStandard,
+      "🏔️ mountain topo": esriTopo,
+      "🛰️ satellite": esriSatellite
+    };
+    L.control.layers(baseMaps).addTo(map);
+
+    let currentGeoJsonLayer = null;
+
+    function getRouteColor(score) {
+      if (score >= 75) return '#e05a5a'; // Red - Legendary
+      if (score >= 60) return '#e6b84a'; // Yellow - Spirited
+      if (score >= 45) return '#52c97a'; // Green - Technical
+      return '#4a9eff';                  // Blue - Mild
+    }
+
+    function updateStatus(text, isError = false) {
+      const badge = document.getElementById('status-badge');
+      badge.textContent = text;
+      badge.style.color = isError ? 'var(--red)' : 'var(--green)';
+    }
+
+    function renderGeoJson(geojsonData, sourceLabel = 'file') {
+      if (currentGeoJsonLayer) {
+        map.removeLayer(currentGeoJsonLayer);
+      }
+
+      const features = geojsonData.features || [];
+      if (features.length === 0) {
+        updateStatus(`0 routes found in ${sourceLabel}`, true);
+        return;
+      }
+
+      currentGeoJsonLayer = L.geoJSON(geojsonData, {
+        style: function(feature) {
+          const score = feature.properties.composite_driving_score || 0;
+          return {
+            color: getRouteColor(score),
+            weight: 5.5,
+            opacity: 0.92,
+            lineJoin: 'round',
+            lineCap: 'round'
+          };
+        },
+        onEachFeature: function(feature, layer) {
+          const p = feature.properties;
+          const popupHtml = `
+            <div class="popup-title">${p.road_name || 'Enthusiast Route'}</div>
+            <div class="popup-metric"><span>fun score:</span><span class="popup-val" style="color:var(--yellow);">${p.composite_driving_score} / 100</span></div>
+            <div class="popup-metric"><span>length:</span><span class="popup-val">${p.length_km} km (${(p.length_km * 0.621371).toFixed(1)} mi)</span></div>
+            <div class="popup-metric"><span>speed limit:</span><span class="popup-val">${p.avg_speed_limit} mph</span></div>
+            <div class="popup-metric"><span>sinuosity:</span><span class="popup-val">${p.sinuosity_score}/100</span></div>
+            <div class="popup-metric"><span>curvature:</span><span class="popup-val">${p.curvature_score}/100 (${p.twistiness_deg_per_km}&deg;/km)</span></div>
+            <div class="popup-metric"><span>curves detected:</span><span class="popup-val">${p.curve_count} (${p.curves_per_km}/km)</span></div>
+            <div class="popup-metric"><span>traffic penalty:</span><span class="popup-val">${p.traffic_penalty}</span></div>
+            ${p.google_maps_url ? `
+              <a href="${p.google_maps_url}" target="_blank" rel="noopener" style="display:block; text-align:center; margin-top:10px; padding:7px 10px; background:var(--accent); color:#0c0c0b; text-decoration:none; border-radius:4px; font-family:var(--mono); font-weight:700; font-size:0.78rem;">
+                🗺️ navigate in google maps &rarr;
+              </a>
+            ` : ''}
+          `;
+          layer.bindPopup(popupHtml);
+
+          layer.on('mouseover', function() {
+            this.setStyle({ weight: 8.5, opacity: 1.0 });
+          });
+          layer.on('mouseout', function() {
+            this.setStyle({ weight: 5.5, opacity: 0.92 });
+          });
+        }
+      }).addTo(map);
+
+      try {
+        const bounds = currentGeoJsonLayer.getBounds();
+        if (bounds.isValid()) {
+          map.fitBounds(bounds, { padding: [50, 50] });
+        }
+      } catch (err) {
+        console.error("Could not fit bounds:", err);
+      }
+
+      const tourUrl = geojsonData.metadata?.google_maps_tour_url;
+      const tourLink = document.getElementById('tour-link');
+      const modalTourLink = document.getElementById('modal-tour-link');
+      if (tourUrl && tourLink) {
+        tourLink.href = tourUrl;
+        tourLink.style.display = 'inline-block';
+      } else if (tourLink) {
+        tourLink.style.display = 'none';
+      }
+      if (tourUrl && modalTourLink) {
+        modalTourLink.href = tourUrl;
+      }
+
+      const gpxLink = document.getElementById('gpx-link');
+      if (gpxLink) {
+        const baseName = sourceLabel.replace(/\.(geojson|json)$/i, '');
+        gpxLink.href = baseName + '.gpx';
+        gpxLink.download = baseName + '.gpx';
+      }
+
+      const topRoad = features[0]?.properties?.road_name || 'routes';
+      updateStatus(`${features.length} routes &bull; ${topRoad}`);
+    }
+
+    // Try multiple possible relative paths with timestamp to bust cache
+    async function loadWithCandidatePaths(filename) {
+      updateStatus(`loading ${filename}...`);
+      const candidates = [
+        filename,
+        '../' + filename,
+        './' + filename,
+        '/' + filename,
+        'examples/' + filename
+      ];
+
+      for (const p of candidates) {
+        try {
+          const res = await fetch(p + '?t=' + Date.now());
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.type === 'FeatureCollection') {
+              renderGeoJson(data, filename);
+              return true;
+            }
+          }
+        } catch (e) {
+          // continue to next candidate path
+        }
+      }
+      return false;
+    }
+
+    // ── Live Address Discovery & Toast System ──
+    let toastTimeout = null;
+    function showToast(text, type = 'info', duration = 4000) {
+      const toast = document.getElementById('discovery-toast');
+      const spinner = document.getElementById('toast-spinner');
+      const icon = document.getElementById('toast-icon');
+      const textEl = document.getElementById('toast-text');
+
+      if (!toast || !textEl) return;
+      if (toastTimeout) clearTimeout(toastTimeout);
+
+      textEl.innerHTML = text;
+
+      if (type === 'loading') {
+        spinner.style.display = 'block';
+        icon.style.display = 'none';
+        toast.style.borderColor = 'var(--accent)';
+      } else {
+        spinner.style.display = 'none';
+        icon.style.display = 'inline-block';
+        if (type === 'success') {
+          icon.textContent = '✅';
+          toast.style.borderColor = 'var(--green)';
+        } else if (type === 'error') {
+          icon.textContent = '❌';
+          toast.style.borderColor = 'var(--red)';
+        } else if (type === 'warning') {
+          icon.textContent = '⚠️';
+          toast.style.borderColor = 'var(--yellow)';
+        } else {
+          icon.textContent = 'ℹ️';
+          toast.style.borderColor = 'var(--accent)';
+        }
+      }
+
+      toast.style.display = 'flex';
+
+      if (duration > 0) {
+        toastTimeout = setTimeout(() => {
+          toast.style.display = 'none';
+        }, duration);
+      }
+    }
+
+    async function handleDiscover(event) {
+      if (event) event.preventDefault();
+      const input = document.getElementById('address-input');
+      const radiusSelect = document.getElementById('radius-select');
+      const btn = document.getElementById('discover-btn');
+
+      const address = input ? input.value.trim() : '';
+      const radius = radiusSelect ? parseFloat(radiusSelect.value) : 15.0;
+
+      if (!address) {
+        showToast('Please enter an address, city, town, or landmark.', 'warning', 3500);
+        return;
+      }
+
+      // UI loading state
+      btn.disabled = true;
+      btn.querySelector('.btn-text').style.display = 'none';
+      btn.querySelector('.btn-spinner').style.display = 'inline-flex';
+      updateStatus(`discovering ${address}...`);
+      showToast(`Discovering roads in <b>${address}</b> (${radius} mi radius)... Fetching OSM network & calculating curvature... (~5–15s)`, 'loading', 0);
+
+      try {
+        const response = await fetch('/api/discover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            address: address,
+            radius: radius,
+            min_length: 2.5,
+            target_speed: 50.0
+          })
+        });
+
+        if (!response.ok) {
+          if (response.status === 501 || response.status === 404) {
+            throw new Error(`Static file server detected. To discover roads from the webpage, run: <code>python server.py</code> in your terminal.`);
+          }
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.detail || `Server returned error (${response.status})`);
+        }
+
+        const geojsonData = await response.json();
+        const features = geojsonData.features || [];
+
+        if (features.length === 0) {
+          showToast(`0 enthusiast routes found within ${radius} miles of "${address}". Try increasing radius to 20 or 25 mi, or query the broader county.`, 'warning', 8000);
+          updateStatus(`0 routes for ${address}`, true);
+        } else {
+          renderGeoJson(geojsonData, `discovered_routes.geojson (${address})`);
+          showToast(`Discovered <b>${features.length} enthusiast routes</b> near ${address}! Click any road on the map to navigate.`, 'success', 5000);
+
+          // Update select box option
+          const select = document.getElementById('geojson-select');
+          if (select) {
+            let opt = select.querySelector('option[value="discovered_routes.geojson"]');
+            if (opt) {
+              opt.textContent = `discovered_routes.geojson (${features.length} routes: ${address})`;
+            }
+            select.value = 'discovered_routes.geojson';
+          }
+        }
+      } catch (err) {
+        console.error('Discover error:', err);
+        showToast(err.message, 'error', 10000);
+        updateStatus('discovery error', true);
+      } finally {
+        btn.disabled = false;
+        btn.querySelector('.btn-text').style.display = 'inline-flex';
+        btn.querySelector('.btn-spinner').style.display = 'none';
+      }
+    }
+
+    async function loadSelected() {
+      const filename = document.getElementById('geojson-select').value;
+      const success = await loadWithCandidatePaths(filename);
+      if (!success) {
+        updateStatus(`missing ${filename}`, true);
+      }
+    }
+
+    document.getElementById('geojson-select').addEventListener('change', loadSelected);
+    document.getElementById('reload-btn').addEventListener('click', loadSelected);
+
+    document.getElementById('file-input').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      updateStatus(`reading ${file.name}...`);
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const json = JSON.parse(evt.target.result);
+          renderGeoJson(json, file.name);
+        } catch (err) {
+          alert("Invalid GeoJSON file: " + err.message);
+          updateStatus("invalid geojson", true);
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // Modal Open / Close Logic
+    const guideModal = document.getElementById('guide-modal');
+    const openGuideBtn = document.getElementById('open-guide-btn');
+    const closeGuideBtn = document.getElementById('close-guide-btn');
+    const closeGuideBtnBottom = document.getElementById('close-guide-btn-bottom');
+
+    function openModal() {
+      window.open('navigation_guide.html', '_blank');
+    }
+    function closeModal() {
+      if (guideModal) guideModal.style.display = 'none';
+    }
+
+    if (openGuideBtn) openGuideBtn.addEventListener('click', openModal);
+    if (closeGuideBtn) closeGuideBtn.addEventListener('click', closeModal);
+    if (closeGuideBtnBottom) closeGuideBtnBottom.addEventListener('click', closeModal);
+
+    window.addEventListener('click', function(e) {
+      if (e.target === guideModal) closeModal();
+    });
+
+    // Auto-load latest discovered routes on page load
+    loadSelected();
+  </script>
+</body>
+</html>

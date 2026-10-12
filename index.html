@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="en" data-palette="catppuccin" data-mode="ink">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FindRoads &bull; OpenSource Road Discovery Engine</title>
+  <meta name="description" content="Algorithmic road discovery and ranking engine for driving enthusiasts. Ingests OpenStreetMap data, computes sinuosity & curvature, and exports GeoJSON, GPX, KML, and Google Maps tours." />
+  <meta name="theme-color" content="#17171a" />
+
+  <!-- Herdr Fonts: Archivo, Inter, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,600;0,700;0,800;0,900;1,800;1,900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet Map CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Design System Stylesheet -->
+  <link rel="stylesheet" href="site.css" />
+
+  <script>
+    /* Ground selection (ink / dark vs paper / light) */
+    window.herdrGround = {
+      read: function () {
+        try {
+          return localStorage.getItem("roads-ground") === "paper" ? "paper" : "ink";
+        } catch (e) {
+          return "ink";
+        }
+      },
+      apply: function (mode) {
+        var root = document.documentElement;
+        root.setAttribute("data-mode", mode);
+        root.setAttribute("data-palette", mode === "paper" ? "solarized-light" : "catppuccin");
+        var buttons = document.querySelectorAll("[data-ground]");
+        buttons.forEach(function (b) {
+          b.setAttribute("aria-pressed", String(b.dataset.ground === mode));
+        });
+        return mode;
+      },
+      save: function (mode) {
+        try {
+          localStorage.setItem("roads-ground", mode);
+        } catch (e) {}
+      }
+    };
+    window.herdrGround.apply(window.herdrGround.read());
+  </script>
+  <style>
+    /* Mode Selector Bar Styling */
+    .mode-tabs-bar {
+      display: flex;
+      gap: 2px;
+      background: var(--panel);
+      border: 1px solid var(--line2);
+      border-bottom: 0;
+      padding: 4px;
+    }
+
+    .mode-tab-btn {
+      flex: 1;
+      background: transparent;
+      border: 0;
+      color: var(--faint2);
+      font-family: var(--mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 8px 12px;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      transition: all 0.12s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .mode-tab-btn:hover {
+      color: var(--ink);
+      background: color-mix(in srgb, var(--panel) 80%, var(--spot));
+    }
+
+    .mode-tab-btn.active {
+      background: var(--bg);
+      color: var(--spot);
+      border-bottom: 2px solid var(--spot);
+    }
+
+    .route-form-panel {
+      background: var(--panel);
+      border: 1px solid var(--line2);
+      padding: 14px 18px;
+      margin-bottom: 16px;
+    }
+  </style>
+</head>
+<body class="site">
+  <div class="hd-frame">
+
+    <!-- ── Header Navigation ── -->
+    <nav class="hd-nav">
+      <a class="lock" href="/">
+        <span class="ram"></span>
+        <b>findroads</b>
+        <span class="tag-badge">v0.2.0</span>
+      </a>
+      <div class="sp"></div>
+      <a class="lnk active" href="/">Map</a>
+      <a class="lnk" href="/navigation_guide.html">Scoring Guide</a>
+      <a class="lnk" href="/navigation_guide.html#apps">Supported Apps</a>
+      <a class="lnk" href="#presets">Presets</a>
+      <a class="lnk" href="#faq">FAQ</a>
+
+      <div class="mode">
+        <button type="button" data-ground="ink" aria-pressed="true">ink</button>
+        <button type="button" data-ground="paper" aria-pressed="false">paper</button>
+      </div>
+
+      <a class="btn" href="#interactive-map">Discover</a>
+
+      <button type="button" class="menu" id="nav-menu" aria-expanded="false" aria-controls="nav-sheet" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </nav>
+
+    <!-- Mobile Nav Sheet -->
+    <div class="sheet" id="nav-sheet">
+      <a href="/">Map View</a>
+      <a href="/navigation_guide.html">Scoring Guide</a>
+      <a href="/navigation_guide.html#apps">Supported Apps</a>
+      <a href="#presets">Presets</a>
+      <a href="#faq">FAQ</a>
+      <div class="sheet-ground">
+        <span>Ground</span>
+        <div class="mode">
+          <button type="button" data-ground="ink" aria-pressed="true">ink</button>
+          <button type="button" data-ground="paper" aria-pressed="false">paper</button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ── Hero Section ── -->
+    <header class="hd-hero">
+      <a class="seed-ribbon" href="/navigation_guide.html">FindRoads Pro &middot; Enthusiast Driving Engine <span aria-hidden="true">&rarr;</span></a>
+      <span class="ram ghost"></span>
+      <div class="in">
+        <div class="hd-eyebrow"><s></s>algorithmic route scoring</div>
+        <h1>Algorithmic route discovery for <em>driving enthusiasts.</em></h1>
+        <p class="lede">FindRoads ingests global road networks to discover, rank, and export twisty driving routes for sports cars and motorcycles. <b>Calculates sinuosity, heading deflection, and optimal speed windows into a composite Fun Index score.</b></p>
+
+        <div class="go" style="display:flex; gap:14px; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:24px;">
+          <a class="btn-action-primary" href="#interactive-map" style="padding: 13px 26px; font-size: 13px; font-weight: 700; text-decoration: none;">
+            <svg style="width:16px;height:16px;fill:currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+            Explore Interactive Map &rarr;
+          </a>
+          <a class="btn-action-secondary" href="/navigation_guide.html" style="padding: 13px 26px; font-size: 13px; font-weight: 700; text-decoration: none;">
+            📖 Navigation &amp; Export Guide
+          </a>
+        </div>
+
+        <div class="hero-meta">
+          <div class="meta">Sports Cars &amp; Motorcycles &middot; Apple &amp; Google Maps &middot; GPX &amp; KML &nbsp;&mdash;&nbsp; <a href="/navigation_guide.html">view scoring formula &rarr;</a></div>
+          <a class="hero-blog" href="#interactive-map"><span>Live</span> Curvature Engine <b aria-hidden="true">&#8594;</b></a>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── Metric Strip ── -->
+    <div class="strip">
+      <a class="stat" href="#interactive-map" data-count>
+        <b id="n-stars">Fun Index 0-100</b>
+        <span>
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.45L12 17.45 6.2 20.5l1.1-6.45-4.7-4.6 6.5-.95z"/></svg>
+          composite scoring algorithm <i class="live"></i>
+        </span>
+      </a>
+      <a class="stat" href="#interactive-map" data-count>
+        <b id="n-installs">4 Exporters</b>
+        <span>
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10m0 0l-4-4m4 4l4-4M4 17v3h16v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+          GeoJSON · GPX · KML · Google Maps
+        </span>
+      </a>
+      <a class="stat" href="#interactive-map" data-count>
+        <b id="n-plugins">OSMnx Engine</b>
+        <span>
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8v8H3zM13 3h8v8h-8zM3 13h8v8H3zM13 13h8v8h-8z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          OpenStreetMap road networks
+        </span>
+      </a>
+      <a class="stat" href="#presets" data-count>
+        <b>2 Presets</b>
+        <span>
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l6 6-6 6M13 18h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+          Tail of Dragon & Angeles Crest
+        </span>
+      </a>
+    </div>
+
+    <!-- ── Interactive Map & Dashboard Section ── -->
+    <section id="interactive-map" style="padding:48px var(--gut); border-bottom:1px solid var(--line2); background:var(--bg);">
+      <div class="section-head">
+        <div>
+          <div class="hd-eyebrow"><s></s>live web visualizer</div>
+          <h2>Interactive Driving Dashboard</h2>
+        </div>
+        <div id="presets" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <span style="font-family:var(--mono); font-size:11px; color:var(--faint2); text-transform:uppercase;">Quick Presets:</span>
+          <button type="button" class="popup-btn" onclick="loadPreset('tail-of-the-dragon')">🐉 Tail of the Dragon</button>
+          <button type="button" class="popup-btn" onclick="loadPreset('angeles-crest')">⛰️ Angeles Crest Highway</button>
+          <button type="button" class="popup-btn" onclick="loadAddress('Sparrow Bush, NY')">🦅 Hawk's Nest (NY 97)</button>
+          <button type="button" class="popup-btn" onclick="loadAddress('Bear Mountain, NY')">🐻 Bear Mountain, NY</button>
+          <a href="#faq" class="popup-btn" style="text-decoration:none;">❓ Scoring &amp; FAQ</a>
+        </div>
+      </div>
+
+      <!-- Mode Selector Tabs -->
+      <div class="mode-tabs-bar">
+        <button type="button" class="mode-tab-btn active" id="tab-discover" onclick="switchRoutingMode('discover')">
+          🌐 Discover Curvy Roads
+        </button>
+        <button type="button" class="mode-tab-btn" id="tab-loop" onclick="switchRoutingMode('loop')">
+          🔁 Loop Route Builder
+        </button>
+        <button type="button" class="mode-tab-btn" id="tab-p2p" onclick="switchRoutingMode('p2p')">
+          📍 Point-to-Point Route
+        </button>
+      </div>
+
+      <!-- Route Controls Form Panel -->
+      <div class="route-form-panel">
+        <!-- Form 1: Discover Mode -->
+        <form id="discover-form" class="map-control-bar" style="margin:0;" onsubmit="handleDiscover(event)">
+          <div class="map-search-wrap">
+            <span style="margin-right:8px; font-size:14px; user-select:none;">📍</span>
+            <input type="text" id="address-input" placeholder="Enter town, address, or landmark (e.g. 'Franklin Lakes, NJ', 'Warwick, NY')..." required />
+            <select id="radius-select" title="Search radius in miles">
+              <option value="5">5 mi radius</option>
+              <option value="10">10 mi radius</option>
+              <option value="15" selected>15 mi radius</option>
+              <option value="25">25 mi radius</option>
+              <option value="50">50 mi radius</option>
+            </select>
+          </div>
+          <button type="submit" class="btn-discover">Discover Routes →</button>
+        </form>
+
+        <!-- Form 2: Loop Mode -->
+        <form id="loop-form" class="map-control-bar" style="display:none; margin:0;" onsubmit="handleLoopRoute(event)">
+          <div class="map-search-wrap">
+            <span style="margin-right:8px; font-size:14px; user-select:none;">🔁</span>
+            <input type="text" id="loop-address-input" placeholder="Enter loop starting location (e.g. 'Franklin Lakes, NJ')..." required />
+            <select id="loop-distance-select" title="Target loop distance">
+              <option value="15">15 mi loop</option>
+              <option value="25" selected>25 mi loop</option>
+              <option value="40">40 mi loop</option>
+              <option value="60">60 mi loop</option>
+            </select>
+          </div>
+          <button type="submit" class="btn-discover">Generate Driving Loop 🔁</button>
+        </form>
+
+        <!-- Form 3: Point-to-Point Mode -->
+        <form id="p2p-form" class="map-control-bar" style="display:none; margin:0;" onsubmit="handlePointToPoint(event)">
+          <div class="map-search-wrap" style="flex:1;">
+            <span style="margin-right:8px; font-size:14px; user-select:none;">🟢 A</span>
+            <input type="text" id="p2p-origin-input" placeholder="Origin A (e.g. 'Franklin Lakes, NJ')..." required />
+          </div>
+          <div class="map-search-wrap" style="flex:1;">
+            <span style="margin-right:8px; font-size:14px; user-select:none;">🔴 B</span>
+            <input type="text" id="p2p-dest-input" placeholder="Destination B (e.g. 'Warwick, NY')..." required />
+          </div>
+          <button type="submit" class="btn-discover">Build Twisty Route 📍</button>
+        </form>
+      </div>
+
+      <!-- Split Dashboard Grid (Map on Left, Table Sidebar on Right) -->
+      <div class="map-dashboard-grid">
+        <!-- Left Pane: Leaflet Map -->
+        <div class="map-pane-left">
+          <div id="map" style="width:100%; height:100%;"></div>
+
+          <div class="map-overlay-legend">
+            <div class="title">Curvature Score</div>
+            <div class="legend-row"><span class="legend-line" style="background:#f38ba8;"></span> 90-100: Ultra Twisty</div>
+            <div class="legend-row"><span class="legend-line" style="background:#fab387;"></span> 75-89: High Curvature</div>
+            <div class="legend-row"><span class="legend-line" style="background:#f9e2af;"></span> 50-74: Moderate Sweepers</div>
+            <div class="legend-row"><span class="legend-line" style="background:#a6e3a1;"></span> &lt;50: Smooth Highway</div>
+          </div>
+        </div>
+
+        <!-- Right Pane: Table Sidebar -->
+        <div class="map-pane-right">
+          <div class="map-sidebar-header">
+            <span>Routes Table</span>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <select id="table-sort-select" onchange="sortTable(this.value)" style="background:var(--bg); color:var(--ink); border:1px solid var(--line2); font-family:var(--mono); font-size:11px; padding:2px 6px; border-radius:3px; cursor:pointer;" title="Sort routes table">
+                <option value="seq">Sort: 🔁 Loop Order</option>
+                <option value="score">Sort: 🏆 Fun Score</option>
+                <option value="cop_risk">Sort: 👮 Cop Risk</option>
+                <option value="name">Sort: 🔤 Road Name</option>
+              </select>
+              <span id="route-count-badge" class="tag-badge">14 routes</span>
+            </div>
+          </div>
+
+          <div class="map-sidebar-table-wrap">
+            <table class="hd-table">
+              <thead>
+                <tr>
+                  <th onclick="sortTable('seq')" style="width:40px; cursor:pointer;" title="Sort by Loop Travel Order"># <span id="sort-icon-seq">▼</span></th>
+                  <th onclick="sortTable('name')" style="cursor:pointer;" title="Sort by Road Name">Road Name <span id="sort-icon-name"></span></th>
+                  <th onclick="sortTable('cop_risk')" style="width:95px; cursor:pointer;" title="Sort by Cop Risk">Cop Risk <span id="sort-icon-cop_risk"></span></th>
+                  <th onclick="sortTable('score')" style="width:65px; text-align:right; cursor:pointer;" title="Sort by Fun Score">Score <span id="sort-icon-score"></span></th>
+                </tr>
+              </thead>
+              <tbody id="routes-table-body">
+                <!-- Dynamically rendered by JavaScript -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Route Stats & Download Bar -->
+      <div id="route-summary-bar" style="padding:14px 20px; background:var(--panel); border:1px solid var(--line2); border-top:0; display:flex; justify-content:space-between; align-items:center; font-family:var(--mono); font-size:12px; color:var(--dim); flex-wrap:wrap; gap:12px;">
+        <div id="route-stats-text">Showing discovered routes around Franklin Lakes, NJ</div>
+        <div style="display:flex; gap:8px;">
+          <a href="/discovered_routes.gpx" download id="download-gpx-btn" class="popup-btn">📥 Download GPX Track</a>
+          <a href="/discovered_routes.kml" download id="download-kml-btn" class="popup-btn">🗺️ Download KML File</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Capability Grid ── -->
+    <div class="caps">
+      <a class="cap" href="/navigation_guide.html">
+        <div class="n"><span>01</span></div>
+        <div class="cap-in">
+          <h3>Road Network Ingestion.&nbsp;<b class="arw">&#8594;</b></h3>
+          <p>Extracts drivable road networks across bounding boxes, named counties, or custom radius searches while excluding boring interstates and residential alleys.</p>
+        </div>
+        <div class="ev" aria-hidden="true">
+          <div class="ev-row"><span>network-engine</span><b><i class="beat"></i>active</b></div>
+          <div class="ev-note">High-Precision Vector Geometry</div>
+        </div>
+      </a>
+
+      <a class="cap" href="/navigation_guide.html">
+        <div class="n"><span>02</span></div>
+        <div class="cap-in">
+          <h3>Mathematical Fun Index.&nbsp;<b class="arw">&#8594;</b></h3>
+          <p>Evaluates sinuosity ($S = L_{\text{arc}} / L_{\text{chord}}$), angular heading deflection degrees/km ($C$), speed suitability ($V$), and intersection penalties ($P_{\text{traffic}}$).</p>
+        </div>
+        <div class="ev" aria-hidden="true">
+          <div class="ev-row"><span>Sinuosity Score</span><b><i class="w"></i>S_score (0 - 100)</b></div>
+          <div class="ev-row"><span>Curvature Score</span><b><i class="w"></i>C_score (deg / km)</b></div>
+          <div class="ev-row"><span>Speed Window</span><b><i class="w"></i>Target ~50 mph</b></div>
+        </div>
+      </a>
+
+      <a class="cap" href="/navigation_guide.html">
+        <div class="n"><span>03</span></div>
+        <div class="cap-in">
+          <h3>1-Click Navigation Sync.&nbsp;<b class="arw">&#8594;</b></h3>
+          <p>Stream discovered curvy corridors straight to Apple CarPlay or Android Auto using 1-click Google Maps tour links with compressed waypoint dispatch.</p>
+        </div>
+        <div class="ev" aria-hidden="true">
+          <div class="ev-row"><span>Google &amp; Apple Maps</span><b><i class="beat"></i>1-click tour link</b></div>
+          <div class="ev-row"><span>Dashboard Sync</span><b><i class="beat"></i>CarPlay &amp; Android Auto</b></div>
+        </div>
+      </a>
+
+      <a class="cap" href="/navigation_guide.html">
+        <div class="n"><span>04</span></div>
+        <div class="cap-in">
+          <h3>Multi-Format Exporters.&nbsp;<b class="arw">&#8594;</b></h3>
+          <p>Export GeoJSON for web visualizers, standalone GPX tracks for GPS units and navigation apps, KML files for Google Earth, and 1-click Google Maps tour links.</p>
+        </div>
+        <div class="ev" aria-hidden="true">
+          <div class="ev-row"><span>Garmin &amp; InRoute</span><b><i class="beat"></i>GPX 1.1 tracks</b></div>
+          <div class="ev-row"><span>Google My Maps</span><b><i class="beat"></i>KML cloud overlay</b></div>
+        </div>
+      </a>
+
+      <a class="cap" href="/navigation_guide.html">
+        <div class="n"><span>05</span></div>
+        <div class="cap-in">
+          <h3>Interactive Web Map.&nbsp;<b class="arw">&#8594;</b></h3>
+          <p>Full Leaflet web map visualizer with custom dark tiles, score-based line coloring, route length/curvature statistics popups, and instant download buttons.</p>
+        </div>
+        <div class="ev" aria-hidden="true">
+          <div class="ev-row"><span>Live Analytics</span><b><i class="beat"></i>Real-time scoring</b></div>
+          <div class="ev-row"><span>Map Overlay</span><b><i class="beat"></i>Cop risk &amp; elevation</b></div>
+        </div>
+      </a>
+    </div>
+
+    <!-- ── FAQ Section ── -->
+    <section class="faq-section" id="faq">
+      <div class="section-head">
+        <div>
+          <div class="hd-eyebrow"><s></s>frequently asked questions</div>
+          <h2>How FindRoads Engine Works</h2>
+        </div>
+      </div>
+
+      <div class="faq-grid">
+        <div class="faq-item open">
+          <button type="button" class="faq-question" onclick="toggleFaq(this)">
+            <span>How does FindRoads discover and rank curvy enthusiast driving routes?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            FindRoads queries real-time OpenStreetMap road networks via the Overpass API across custom geographic bounding boxes or radius searches. It evaluates <b>macro sinuosity</b> ($S = L_{\text{arc}} / L_{\text{chord}}$), <b>angular corner deflection density</b> ($C$ in deg/km), <b>speed suitability</b> ($V$ centered around 50 mph), and penalizes traffic signals/junctions into a composite <b>Fun Index score (0–100)</b>.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button type="button" class="faq-question" onclick="toggleFaq(this)">
+            <span>How are Driving Loops and Point-to-Point Corridors generated?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            Unlike radius discovery which returns individual roads, <b>Loop Route Builder</b> performs graph pathfinding across the OpenStreetMap network graph. It anchors waypoints in circular quadrants around your starting location and computes shortest path circuits ($Start \rightarrow WP_1 \rightarrow WP_2 \rightarrow WP_3 \rightarrow Start$). Every leg connects end-to-end to form a continuous closed driving loop.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button type="button" class="faq-question" onclick="toggleFaq(this)">
+            <span>How is the Police Patrol & Radar Enforcement Risk calculated?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            Patrol risk is calculated using OpenStreetMap MUTCD highway classification (major state motorways vs remote tertiary connectors), posted speed limits, junction density, and <b>sinuosity curve shielding</b> (continuous tight bends make stationary radar traps impractical). This is combined with regional citation indices derived from NY State DMV and NJ Courts open data.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button type="button" class="faq-question" onclick="toggleFaq(this)">
+            <span>How are speed limits determined if OpenStreetMap data is missing?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            When an OpenStreetMap road segment lacks a tagged <code>maxspeed</code>, FindRoads applies fallback speed limits derived from official US State Department of Transportation highway functional classifications (35 mph for tertiary connectors, 25 mph for residential streets, 50 mph for primary state routes) rather than flat estimates.
+          </div>
+        </div>
+
+        <div class="faq-item open">
+          <button type="button" class="faq-question" onclick="toggleFaq(this)">
+            <span>How does FindRoads empirically penalize traffic lights, businesses, and commercial congestion?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            FindRoads extracts empirical OpenStreetMap tags for <b>traffic signals</b> (<code>highway=traffic_signals</code>), <b>commercial land use & retail stores</b> (<code>landuse=commercial|retail</code>, <code>building=commercial</code>, <code>shop=*</code>, <code>amenity=*</code>), and <b>frequent commercial driveways</b> (<code>highway=service</code>). Roads with high business density or traffic light frequency receive heavy score penalties (up to -50 pts), ensuring pure canyon passes and un-congested backroads rank higher than commercial strip mall corridors.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button type="button" class="faq-question" onclick="toggleFaq(this)">
+            <span>What navigation formats can I export for my car or GPS?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-answer">
+            FindRoads exports <b>1-click Google Maps Tours</b> (with waypoints ensuring Google doesn't reroute you onto straight interstates), <b>1-click Google Street View</b> 360° panoramas, standalone <b>GPX 1.1 tracks</b> (for Garmin, InRoute, Scenic, Calimoto, Apple Maps), and <b>KML files</b> (for Google My Maps & Google Earth).
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Install / CTA Section ── -->
+    <section class="end" id="install">
+      <span class="ram"></span>
+      <div class="in">
+        <h2>Ready to discover your next epic driving corridor?</h2>
+        <p>Find hidden twisties, high-elevation mountain passes, and optimal driving routes in any city or region across North America.</p>
+        <div class="cap-actions" style="justify-content:center; margin-top: 24px; gap: 16px;">
+          <a class="btn-action-primary" href="#interactive-map" style="font-size: 13.5px; padding: 14px 28px; font-weight: 700;">
+            <svg style="width:16px;height:16px;fill:currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+            Discover Routes Near You &rarr;
+          </a>
+          <a class="btn-action-secondary" href="/navigation_guide.html" style="font-size: 13.5px; padding: 14px 28px; font-weight: 700;">
+            📖 View Navigation Guide &rarr;
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Footer ── -->
+    <footer class="foot">
+      <span class="ram"></span>
+      <a href="/">map</a>
+      <a href="/navigation_guide.html">scoring guide</a>
+      <a href="/navigation_guide.html#apps">supported apps</a>
+      <a href="#presets">presets</a>
+      <a href="#faq">faq</a>
+      <span class="sp"></span>
+      <span>built with Python & Leaflet · © 2026 FindRoads</span>
+      <span class="fact">v0.2.0</span>
+    </footer>
+
+
+  </div>
+
+  <!-- Floating Toast Notification -->
+  <div id="toast" class="toast-notice" style="display:none;">
+    <span class="toast-spin"></span>
+    <span id="toast-text">Discovering twisty roads via Overpass API...</span>
+  </div>
+
+  <!-- ── Scripts ── -->
+  <script>
+    /* Ground toggle buttons */
+    (function () {
+      var buttons = document.querySelectorAll("[data-ground]");
+      function paint(mode) {
+        window.herdrGround.apply(mode);
+      }
+      buttons.forEach(function (b) {
+        b.addEventListener("click", function () {
+          window.herdrGround.save(b.dataset.ground);
+          paint(b.dataset.ground);
+        });
+      });
+      paint(window.herdrGround.read());
+    })();
+
+    /* Copy buttons */
+    (function () {
+      [["copy-btn", "install-cmd"], ["copy-btn-2", "install-cmd-2"]].forEach(function (pair) {
+        var button = document.getElementById(pair[0]);
+        var source = document.getElementById(pair[1]);
+        if (!button || !source) return;
+        button.addEventListener("click", function () {
+          var text = source.textContent.replace(/^\s*\$\s*/, "").trim();
+          if (!text) return;
+          navigator.clipboard.writeText(text).then(function () {
+            var was = button.textContent;
+            button.textContent = "copied";
+            setTimeout(function () { button.textContent = was; }, 1400);
+          }).catch(function () {});
+        });
+      });
+    })();
+
+    /* Mobile Sheet Menu */
+    (function () {
+      var btn = document.getElementById("nav-menu");
+      var sheet = document.getElementById("nav-sheet");
+      if (!btn || !sheet) return;
+      function set(open) {
+        sheet.classList.toggle("open", open);
+        btn.setAttribute("aria-expanded", String(open));
+      }
+      btn.addEventListener("click", function (event) {
+        event.stopPropagation();
+        set(!sheet.classList.contains("open"));
+      });
+      document.addEventListener("click", function (event) {
+        if (!sheet.contains(event.target)) set(false);
+      });
+    })();
+
+    /* FAQ Accordion Toggle */
+    function toggleFaq(btn) {
+      if (!btn) return;
+      var item = btn.parentElement;
+      if (item) item.classList.toggle("open");
+    }
+
+    /* Routing Mode Switcher */
+    function switchRoutingMode(mode) {
+      document.querySelectorAll(".mode-tab-btn").forEach(b => b.classList.remove("active"));
+      document.getElementById("tab-" + mode).classList.add("active");
+
+      document.getElementById("discover-form").style.display = (mode === "discover") ? "flex" : "none";
+      document.getElementById("loop-form").style.display = (mode === "loop") ? "flex" : "none";
+      document.getElementById("p2p-form").style.display = (mode === "p2p") ? "flex" : "none";
+    }
+
+    /* Leaflet Map & Road Discovery Controller */
+    var map, routesLayerGroup, markersLayerGroup;
+    var currentGeoJSON = null;
+    var polylineMap = {}; // Maps index to Leaflet Polyline
+
+    function initMap() {
+      map = L.map("map", { zoomControl: true }).setView([41.0173, -74.2057], 12);
+
+      // Dark tiles
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        className: 'dark-tiles',
+        maxZoom: 19
+      }).addTo(map);
+
+      routesLayerGroup = L.layerGroup().addTo(map);
+      markersLayerGroup = L.layerGroup().addTo(map);
+
+      // Load initial routes
+      fetchDiscoveredRoutes();
+    }
+
+    function getCurvatureColor(score) {
+      if (score >= 90) return "#ff0055"; // Vivid Crimson Twist Master
+      if (score >= 75) return "#ff7b00"; // Vivid Amber Orange
+      if (score >= 50) return "#ffd000"; // Electric Gold
+      return "#00e676"; // Vivid Emerald Green
+    }
+
+    var currentTableItems = [];
+    var currentSortKey = "seq";
+    var currentSortAsc = true;
+
+    function sortTable(key) {
+      if (currentSortKey === key) {
+        currentSortAsc = !currentSortAsc;
+      } else {
+        currentSortKey = key;
+        currentSortAsc = (key === "seq" || key === "name") ? true : false;
+      }
+      var sel = document.getElementById("table-sort-select");
+      if (sel) sel.value = key;
+      renderSortedTableRows();
+    }
+
+    function renderSortedTableRows() {
+      var items = currentTableItems.slice();
+      items.sort(function (a, b) {
+        var valA = a[currentSortKey];
+        var valB = b[currentSortKey];
+        if (typeof valA === 'string') {
+          return currentSortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+        return currentSortAsc ? (valA - valB) : (valB - valA);
+      });
+
+      // Update Header Arrow Indicators
+      ["seq", "name", "cop_risk", "score"].forEach(k => {
+        var el = document.getElementById("sort-icon-" + k);
+        if (el) {
+          if (k === currentSortKey) el.textContent = currentSortAsc ? "▲" : "▼";
+          else el.textContent = "";
+        }
+      });
+
+      var tableBody = document.getElementById("routes-table-body");
+      if (!tableBody) return;
+      tableBody.innerHTML = "";
+
+      items.forEach(function (item) {
+        var tr = document.createElement("tr");
+        tr.id = "route-tr-" + item.idx;
+        tr.setAttribute("onclick", "focusRoute(" + item.idx + ")");
+        tr.setAttribute("onmouseenter", "highlightPolyline(" + item.idx + ", true)");
+        tr.setAttribute("onmouseleave", "highlightPolyline(" + item.idx + ", false)");
+        tr.innerHTML = `
+          <td><strong>#${item.seq}</strong></td>
+          <td title="${item.name}">
+            <strong>${item.name}</strong>
+            ${item.streetViewUrl ? `<a href="${item.streetViewUrl}" target="_blank" onclick="event.stopPropagation();" style="margin-left:4px; text-decoration:none;" title="Open 1-Click Google Street View for ${item.name}">📷</a>` : ''}
+          </td>
+          <td><span class="score-pill" style="background:color-mix(in srgb, ${item.copColor} 18%, transparent); color:${item.copColor}; border:1px solid ${item.copColor};">${item.copLevel} (${item.copRiskPct.toFixed(0)}%)</span></td>
+          <td style="text-align:right;"><span class="score-pill" style="background:color-mix(in srgb, ${item.color} 20%, transparent); color:${item.color}; border:1px solid ${item.color};">${item.score.toFixed(1)}</span></td>
+        `;
+        tableBody.appendChild(tr);
+      });
+    }
+
+    var selectedRouteIdx = null;
+
+    function renderGeoJSON(data, title) {
+      currentGeoJSON = data;
+      routesLayerGroup.clearLayers();
+      markersLayerGroup.clearLayers();
+      polylineMap = {};
+      currentTableItems = [];
+      selectedRouteIdx = null;
+
+      var features = data.features || [];
+      var metadata = data.metadata || {};
+      var bounds = L.latLngBounds();
+
+      var totalKm = 0;
+      var maxCurv = 0;
+
+      // Add Origin & Destination markers if point-to-point or loop mode
+      if (metadata.origin_coords) {
+        var origMarker = L.circleMarker([metadata.origin_coords[0], metadata.origin_coords[1]], {
+          radius: 8,
+          fillColor: "#00e676",
+          color: "#ffffff",
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.9
+        }).bindPopup("<b>🟢 Origin A:</b> " + (metadata.origin_name || "Start"));
+        markersLayerGroup.addLayer(origMarker);
+        bounds.extend([metadata.origin_coords[0], metadata.origin_coords[1]]);
+      }
+
+      if (metadata.destination_coords) {
+        var destMarker = L.circleMarker([metadata.destination_coords[0], metadata.destination_coords[1]], {
+          radius: 8,
+          fillColor: "#ff0055",
+          color: "#ffffff",
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.9
+        }).bindPopup("<b>🔴 Destination B:</b> " + (metadata.destination_name || "End"));
+        markersLayerGroup.addLayer(destMarker);
+        bounds.extend([metadata.destination_coords[0], metadata.destination_coords[1]]);
+      }
+
+      features.forEach(function (feat, idx) {
+        var props = feat.properties || {};
+        var coords = feat.geometry ? feat.geometry.coordinates : [];
+        var name = props.name || props.road_name || "Twisty Route #" + (idx + 1);
+        var rank = props.rank || (idx + 1);
+        var score = props.score !== undefined ? Number(props.score) : (props.composite_driving_score !== undefined ? Number(props.composite_driving_score) : (props.curvature_score !== undefined ? Number(props.curvature_score) : 0.0));
+        var speedLimit = props.avg_speed_limit !== undefined ? Number(props.avg_speed_limit) : 50.0;
+        var lengthKm = props.length_km !== undefined ? Number(props.length_km) : (props.length !== undefined ? Number(props.length) : 3.5);
+        var curves = props.hairpin_count !== undefined ? props.hairpin_count : (props.num_curves !== undefined ? props.num_curves : Math.round(lengthKm * 4));
+        var gmapsUrl = props.gmaps_url || props.google_maps_url || metadata.google_maps_tour_url || "";
+
+
+        // Police / Cop Enforcement Risk Model Attributes
+        var copRiskPct = props.cop_risk_pct !== undefined ? props.cop_risk_pct : Math.max(10, Math.min(90, Math.round(100 - (score * 0.55) + (speedLimit > 50 ? 12 : 0))));
+        var copLevel = props.cop_risk_level || (copRiskPct >= 58 ? "High" : copRiskPct >= 32 ? "Mod" : "Low");
+        var copColor = props.cop_risk_color || (copRiskPct >= 58 ? "#ff0055" : copRiskPct >= 32 ? "#ff7b00" : "#00e676");
+
+        totalKm += lengthKm;
+        if (score > maxCurv) maxCurv = score;
+
+        var color = getCurvatureColor(score);
+
+        // Convert GeoJSON coords [lon, lat] to Leaflet [lat, lon]
+        var latLngs = coords.map(c => [c[1], c[0]]);
+        latLngs.forEach(ll => bounds.extend(ll));
+
+        // 1-Click Google Street View Panorama URL
+        var midPtIndex = Math.floor(latLngs.length / 2);
+        var defaultSvUrl = latLngs.length > 0 ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${latLngs[midPtIndex][0]},${latLngs[midPtIndex][1]}` : "";
+        var streetViewUrl = props.street_view_url || defaultSvUrl;
+
+        // Background contrast casing line
+        var casing = L.polyline(latLngs, {
+          color: "#09090d",
+          weight: 9,
+          opacity: 0.85,
+          lineJoin: 'round'
+        });
+        routesLayerGroup.addLayer(casing);
+
+        // Main high-contrast route polyline
+        var polyline = L.polyline(latLngs, {
+          color: color,
+          weight: 6,
+          opacity: 0.95,
+          lineJoin: 'round'
+        });
+
+        polylineMap[idx] = { main: polyline, casing: casing };
+
+        var popupHtml = `
+          <div class="popup-hd">${name}</div>
+          <div class="popup-row"><span>Fun Index Score:</span> <span>${score.toFixed(1)}</span></div>
+          <div class="popup-row"><span>Cop / Radar Risk:</span> <span style="color:${copColor}; font-weight:bold;">${copLevel} (${copRiskPct.toFixed(0)}%)</span></div>
+          <div class="popup-row"><span>Length:</span> <span>${lengthKm.toFixed(1)} km (${(lengthKm * 0.621371).toFixed(1)} mi)</span></div>
+          <div class="popup-row"><span>Speed Limit:</span> <span>${speedLimit.toFixed(0)} mph</span></div>
+          <div class="popup-row"><span>Estimated Curves:</span> <span>~${curves} turns</span></div>
+          <div class="popup-actions" style="flex-wrap:wrap; gap:6px;">
+            ${gmapsUrl ? `<a href="${gmapsUrl}" target="_blank" class="popup-btn">📍 Google Maps Tour</a>` : ''}
+            ${streetViewUrl ? `<a href="${streetViewUrl}" target="_blank" class="popup-btn" style="background:var(--spot); color:var(--spot-ink);" title="Open Google Street View">📷 Street View</a>` : ''}
+            <button type="button" onclick="openRoadModal(${idx});" class="popup-btn" style="background:var(--panel); color:var(--ink); border:1px solid var(--line2); font-weight:600;">📊 Full Telemetry Modal</button>
+            <a href="/discovered_routes.gpx" download class="popup-btn">📥 GPX</a>
+          </div>
+        `;
+
+        casing.bindPopup(popupHtml);
+        polyline.bindPopup(popupHtml);
+
+        [casing, polyline].forEach(function(layer) {
+          layer.on('mouseover', function () {
+            highlightPolyline(idx, true);
+          });
+          layer.on('mouseout', function () {
+            highlightPolyline(idx, false);
+          });
+          layer.on('click', function (e) {
+            focusRoute(idx, e ? e.latlng : null, true);
+          });
+        });
+
+        routesLayerGroup.addLayer(polyline);
+
+        // Store item for dynamic sorting & modal inspection
+        currentTableItems.push({
+          idx: idx,
+          seq: idx + 1,
+          rank: rank,
+          name: name,
+          cop_risk: copRiskPct,
+          copRiskPct: copRiskPct,
+          copLevel: copLevel,
+          copColor: copColor,
+          score: score,
+          curvatureScore: props.curvature_score !== undefined ? Number(props.curvature_score) : 0.0,
+          sinuosityScore: props.sinuosity_score !== undefined ? Number(props.sinuosity_score) : 0.0,
+          sinuosityRaw: props.sinuosity_raw !== undefined ? Number(props.sinuosity_raw) : 1.20,
+          twistiness: props.twistiness_deg_per_km !== undefined ? Number(props.twistiness_deg_per_km) : 50.0,
+          lengthKm: lengthKm,
+          speedLimit: speedLimit,
+          curves: curves,
+          intersections: props.intersections_count !== undefined ? props.intersections_count : 0,
+          signals: props.traffic_signals_count !== undefined ? props.traffic_signals_count : 0,
+          qualityLabel: props.road_quality_label || 'Smooth Pavement',
+          color: color,
+          gmapsUrl: gmapsUrl,
+          streetViewUrl: streetViewUrl
+        });
+      });
+
+      // Default sort key: Loop order for loop / point-to-point modes, Score for discover mode
+      currentSortKey = (metadata.route_mode === "loop" || metadata.route_mode === "point_to_point") ? "seq" : "score";
+      currentSortAsc = (currentSortKey === "seq") ? true : false;
+      var sortSelect = document.getElementById("table-sort-select");
+      if (sortSelect) sortSelect.value = currentSortKey;
+      renderSortedTableRows();
+
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [40, 40] });
+      }
+
+      var tourUrl = metadata.google_maps_tour_url || "";
+      var summaryText = `Showing ${features.length} highlighted routes (${(totalKm * 0.621371).toFixed(1)} mi total) for ${title || 'target area'}`;
+      if (metadata.route_mode === "loop") {
+        summaryText = `🔁 ${metadata.loop_miles || 25} mile Driving Loop cataloged around ${title}`;
+      } else if (metadata.route_mode === "point_to_point") {
+        summaryText = `📍 Twisty Corridor from ${metadata.origin_name || 'A'} to ${metadata.destination_name || 'B'}`;
+      }
+
+      document.getElementById("route-stats-text").textContent = summaryText;
+      document.getElementById("route-count-badge").textContent = `${features.length} routes`;
+
+      var tourLink = document.getElementById("gmaps-tour-btn");
+      if (tourUrl) {
+        if (!tourLink) {
+          var gpxBtn = document.getElementById("download-gpx-btn");
+          if (gpxBtn) {
+            tourLink = document.createElement("a");
+            tourLink.id = "gmaps-tour-btn";
+            tourLink.target = "_blank";
+            tourLink.className = "popup-btn";
+            tourLink.style.background = "var(--spot)";
+            tourLink.style.color = "var(--spot-ink)";
+            tourLink.textContent = "📍 1-Click Google Maps Tour";
+            gpxBtn.parentNode.insertBefore(tourLink, gpxBtn);
+          }
+        }
+        if (tourLink) {
+          tourLink.href = tourUrl;
+          tourLink.style.display = "inline-flex";
+        }
+      } else if (tourLink) {
+        tourLink.style.display = "none";
+      }
+    }
+
+    function highlightPolyline(idx, hover) {
+      var item = polylineMap[idx];
+      if (item) {
+        var pl = item.main || item;
+        var cs = item.casing;
+        if (hover || idx === selectedRouteIdx) {
+          if (cs) {
+            cs.setStyle({ weight: 16, opacity: 1.0 });
+            if (cs.bringToFront) cs.bringToFront();
+          }
+          pl.setStyle({ weight: 12, opacity: 1.0 });
+          if (pl.bringToFront) pl.bringToFront();
+          highlightTableRow(idx, true);
+        } else {
+          if (cs) {
+            cs.setStyle({ weight: 9, opacity: 0.85 });
+          }
+          pl.setStyle({ weight: 6, opacity: 0.95 });
+          if (selectedRouteIdx !== null) {
+            highlightTableRow(selectedRouteIdx, true);
+          } else {
+            highlightTableRow(idx, false);
+          }
+        }
+      }
+    }
+
+    function highlightTableRow(idx, active) {
+      document.querySelectorAll("#routes-table-body tr").forEach(tr => {
+        if (tr.id === "route-tr-" + idx && active) {
+          tr.classList.add("active-row");
+        } else if (tr.id !== "route-tr-" + selectedRouteIdx) {
+          tr.classList.remove("active-row");
+        }
+      });
+    }
+
+    function focusRoute(idx, clickedLatLng, isMapClick) {
+      selectedRouteIdx = idx;
+
+      // Update polylines so selected route remains highlighted
+      Object.keys(polylineMap).forEach(key => {
+        var k = Number(key);
+        highlightPolyline(k, k === idx);
+      });
+
+      var item = polylineMap[idx];
+      if (item) {
+        var pl = item.main || item;
+        if (!isMapClick) {
+          map.fitBounds(pl.getBounds(), { padding: [60, 60] });
+        }
+        if (clickedLatLng) {
+          pl.openPopup(clickedLatLng);
+        } else {
+          pl.openPopup();
+        }
+
+        // Reliably scroll the sidebar table container to center the selected street row
+        var wrap = document.querySelector(".map-sidebar-table-wrap");
+        var tr = document.getElementById("route-tr-" + idx);
+        if (tr) {
+          highlightTableRow(idx, true);
+          if (wrap) {
+            var trTop = tr.offsetTop;
+            var trHeight = tr.offsetHeight;
+            var wrapHeight = wrap.clientHeight;
+            var targetScrollTop = Math.max(0, trTop - (wrapHeight / 2) + (trHeight / 2));
+            wrap.scrollTo({
+              top: targetScrollTop,
+              behavior: "smooth"
+            });
+          }
+        }
+      }
+    }
+
+    function openRoadModal(idx, clickedLatLng) {
+      var item = currentTableItems.find(t => t.idx === idx);
+      if (!item) return;
+
+      var svUrl = item.streetViewUrl;
+      if (clickedLatLng) {
+        var lat = null, lng = null;
+        if (typeof clickedLatLng.lat === 'number') lat = clickedLatLng.lat;
+        else if (typeof clickedLatLng.lat === 'string') lat = parseFloat(clickedLatLng.lat);
+        else if (Array.isArray(clickedLatLng) && typeof clickedLatLng[0] === 'number') lat = clickedLatLng[0];
+
+        if (typeof clickedLatLng.lng === 'number') lng = clickedLatLng.lng;
+        else if (typeof clickedLatLng.lng === 'string') lng = parseFloat(clickedLatLng.lng);
+        else if (Array.isArray(clickedLatLng) && typeof clickedLatLng[1] === 'number') lng = clickedLatLng[1];
+
+        if (lat !== null && !isNaN(lat) && lng !== null && !isNaN(lng)) {
+          svUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat.toFixed(6)},${lng.toFixed(6)}`;
+        }
+      }
+
+      var modalHtml = `
+        <div class="road-modal-overlay" id="road-modal" onclick="closeRoadModal(event)">
+          <div class="road-modal-card" onclick="event.stopPropagation()">
+            <div class="road-modal-header">
+              <div>
+                <div class="hd-eyebrow"><s></s>road telemetry &amp; inspection</div>
+                <h3 style="margin:4px 0 0; font-family:var(--disp); font-size:22px; font-weight:800; color:var(--ink);">${item.name}</h3>
+              </div>
+              <button type="button" class="road-modal-close" onclick="closeRoadModal()">&times;</button>
+            </div>
+
+            <div class="road-modal-badges">
+              <span class="modal-badge" style="background:var(--spot); color:var(--spot-ink); font-weight:700;">
+                🏆 Fun Index: ${item.score.toFixed(1)} / 100
+              </span>
+              <span class="modal-badge" style="background:${item.copColor}; color:#11111b; font-weight:700;">
+                👮 Cop Risk: ${item.copLevel} (${item.copRiskPct.toFixed(0)}%)
+              </span>
+              <span class="modal-badge" style="border:1px solid var(--line2); color:var(--ink);">
+                🛣️ ${item.qualityLabel || 'Smooth Pavement'}
+              </span>
+            </div>
+
+            <div class="road-modal-grid">
+              <div class="modal-stat"><label>Length</label><b>${item.lengthKm.toFixed(1)} km (${(item.lengthKm * 0.621371).toFixed(1)} mi)</b></div>
+              <div class="modal-stat"><label>Speed Limit</label><b>${item.speedLimit.toFixed(0)} mph</b></div>
+              <div class="modal-stat"><label>Curvature Score</label><b>${item.curvatureScore.toFixed(1)} / 100</b></div>
+              <div class="modal-stat"><label>Twistiness Density</label><b>${item.twistiness.toFixed(1)} deg/km</b></div>
+              <div class="modal-stat"><label>Sinuosity Index</label><b>${item.sinuosityRaw ? item.sinuosityRaw.toFixed(2) : '1.20'} (score ${item.sinuosityScore.toFixed(1)})</b></div>
+              <div class="modal-stat"><label>Intersections / Signals</label><b>${item.intersections} Jct &middot; ${item.signals} Lights</b></div>
+            </div>
+
+            <div class="road-modal-actions">
+              ${svUrl ? `
+                <a href="${svUrl}" target="_blank" rel="noopener" class="btn-action-primary" style="flex:1; justify-content:center; text-decoration:none; text-align:center;">
+                  📷 Open 1-Click Street View &rarr;
+                </a>
+              ` : ''}
+              ${item.gmapsUrl ? `
+                <a href="${item.gmapsUrl}" target="_blank" rel="noopener" class="btn-action-secondary" style="flex:1; justify-content:center; text-decoration:none; text-align:center;">
+                  📍 1-Click Google Maps Tour
+                </a>
+              ` : ''}
+            </div>
+
+            <div style="display:flex; gap:10px; margin-top:4px;">
+              <a href="/discovered_routes.gpx" download="${item.name.replace(/[^a-zA-Z0-9]/g, '_')}.gpx" class="popup-btn" style="flex:1; justify-content:center; text-align:center;">
+                📥 Download GPX Track
+              </a>
+              <a href="/discovered_routes.kml" download="${item.name.replace(/[^a-zA-Z0-9]/g, '_')}.kml" class="popup-btn" style="flex:1; justify-content:center; text-align:center;">
+                🗺️ Download KML Overlay
+              </a>
+            </div>
+          </div>
+        </div>
+      `;
+
+      var existing = document.getElementById("road-modal");
+      if (existing) existing.remove();
+
+      document.body.insertAdjacentHTML("beforeend", modalHtml);
+    }
+
+    function closeRoadModal(event) {
+      if (event && event.stopPropagation) event.stopPropagation();
+      var modal = document.getElementById("road-modal");
+      if (modal) modal.remove();
+    }
+
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "Escape") {
+        closeRoadModal();
+      }
+    });
+
+    function showToast(text) {
+      var t = document.getElementById("toast");
+      document.getElementById("toast-text").textContent = text;
+      t.style.display = "flex";
+    }
+
+    function hideToast() {
+      document.getElementById("toast").style.display = "none";
+    }
+
+    function fetchDiscoveredRoutes() {
+      fetch("/discovered_routes.geojson")
+        .then(res => res.json())
+        .then(data => renderGeoJSON(data, "Franklin Lakes, NJ"))
+        .catch(err => console.log("Note loading initial geojson:", err));
+    }
+
+    function handleDiscover(event) {
+      if (event) event.preventDefault();
+      var address = document.getElementById("address-input").value.trim();
+      var radius = document.getElementById("radius-select").value;
+
+      if (!address) return;
+
+      showToast("Highlighting twisty routes via Overpass API for: " + address + "...");
+
+      fetch("/api/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: address, radius: parseFloat(radius) })
+      })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || "Search failed (HTTP " + res.status + ")");
+        }
+        return res.json();
+      })
+      .then(data => {
+        hideToast();
+        renderGeoJSON(data, address);
+      })
+      .catch(err => {
+        hideToast();
+        alert("Discovery search error: " + err.message);
+      });
+    }
+
+    function handleLoopRoute(event) {
+      if (event) event.preventDefault();
+      var address = document.getElementById("loop-address-input").value.trim();
+      var loopMiles = document.getElementById("loop-distance-select").value;
+
+      if (!address) return;
+
+      showToast("Building " + loopMiles + " mile twisty loop around: " + address + "...");
+
+      fetch("/api/route/loop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: address, loop_miles: parseFloat(loopMiles) })
+      })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || "Loop generation failed (HTTP " + res.status + ")");
+        }
+        return res.json();
+      })
+      .then(data => {
+        hideToast();
+        renderGeoJSON(data, address);
+      })
+      .catch(err => {
+        hideToast();
+        alert("Loop route error: " + err.message);
+      });
+    }
+
+    function handlePointToPoint(event) {
+      if (event) event.preventDefault();
+      var origin = document.getElementById("p2p-origin-input").value.trim();
+      var dest = document.getElementById("p2p-dest-input").value.trim();
+
+      if (!origin || !dest) return;
+
+      showToast("Generating twisty corridor from " + origin + " to " + dest + "...");
+
+      fetch("/api/route/point-to-point", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ origin: origin, destination: dest })
+      })
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || "Point-to-Point routing failed (HTTP " + res.status + ")");
+        }
+        return res.json();
+      })
+      .then(data => {
+        hideToast();
+        renderGeoJSON(data, origin + " → " + dest);
+      })
+      .catch(err => {
+        hideToast();
+        alert("Point-to-point route error: " + err.message);
+      });
+    }
+
+    function loadAddress(addr) {
+      switchRoutingMode('discover');
+      document.getElementById("address-input").value = addr;
+      handleDiscover(null);
+    }
+
+    function loadPreset(slug) {
+      switchRoutingMode('discover');
+      showToast("Loading preset route: " + slug + "...");
+      fetch("/api/v1/routes/preset/" + slug)
+        .then(res => res.json())
+        .then(data => {
+          hideToast();
+          renderGeoJSON(data, slug.replace(/-/g, ' '));
+        })
+        .catch(err => {
+          hideToast();
+          alert("Error loading preset: " + err.message);
+        });
+    }
+
+    window.addEventListener("DOMContentLoaded", initMap);
+  </script>
+</body>
+</html>

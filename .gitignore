@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+*.log
+scratch/
+discovered_routes.gpx
+discovered_routes.kml
