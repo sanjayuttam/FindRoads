@@ -11,15 +11,15 @@ from datetime import datetime
 
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-QA_FILE_PATH = os.path.join(DATA_DIR, "qa_feedback.json")
-CONFIG_FILE_PATH = os.path.join(DATA_DIR, "discovery_config.json")
+QA_FILE_PATH = os.environ.get("QA_FILE_PATH", os.path.join(DATA_DIR, "qa_feedback.json"))
+CONFIG_FILE_PATH = os.environ.get("CONFIG_FILE_PATH", os.path.join(DATA_DIR, "discovery_config.json"))
 
 
 class RoadQAEngine:
     """Manages QA feedback collection, metrics validation, and continuous algorithm weight calibration."""
 
-    def __init__(self, qa_file: str = QA_FILE_PATH):
-        self.qa_file = qa_file
+    def __init__(self, qa_file: Optional[str] = None):
+        self.qa_file = qa_file or os.environ.get("QA_FILE_PATH", os.path.join(DATA_DIR, "qa_feedback.json"))
         os.makedirs(os.path.dirname(self.qa_file), exist_ok=True)
         self.feedback_records = self.load_feedback()
 

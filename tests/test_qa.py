@@ -12,11 +12,16 @@ class TestRoadQA(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         self.qa_file = os.path.join(self.test_dir, "qa_feedback.json")
+        self.config_file = os.path.join(self.test_dir, "discovery_config.json")
+        os.environ["QA_FILE_PATH"] = self.qa_file
+        os.environ["CONFIG_FILE_PATH"] = self.config_file
         self.qa_engine = RoadQAEngine(qa_file=self.qa_file)
         self.client = TestClient(app)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
+        os.environ.pop("QA_FILE_PATH", None)
+        os.environ.pop("CONFIG_FILE_PATH", None)
 
     def test_add_and_retrieve_qa_feedback(self):
         record = self.qa_engine.add_feedback(
