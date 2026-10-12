@@ -1,0 +1,32 @@
+[
+  {
+    "id": "qa_1_1791774957",
+    "road_name": "White Meadow Avenue",
+    "location": "Ringwood, NJ",
+    "user_rating": 2,
+    "algo_score": 62.0,
+    "suggested_score": 25.0,
+    "error_delta": 37.0,
+    "tags": [
+      "too_residential",
+      "low_speed_limit"
+    ],
+    "notes": "Too many houses and driveways",
+    "timestamp": "2026-10-11T23:15:57.563199"
+  },
+  {
+    "id": "qa_2_1791774990",
+    "road_name": "White Meadow Avenue",
+    "location": "Ringwood, NJ",
+    "user_rating": 2,
+    "algo_score": 62.0,
+    "suggested_score": 25.0,
+    "error_delta": 37.0,
+    "tags": [
+      "too_residential",
+      "low_speed_limit"
+    ],
+    "notes": "Too many houses and driveways",
+    "timestamp": "2026-10-11T23:16:30.569421"
+  }
+]

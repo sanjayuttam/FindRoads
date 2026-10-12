@@ -118,6 +118,7 @@
         <button type="button" data-ground="paper" aria-pressed="false">paper</button>
       </div>
 
+      <button type="button" onclick="openQADashboard()" class="btn" style="background:var(--panel); border:1px solid var(--line2); color:var(--ink); font-weight:700; cursor:pointer;">⭐ QA &amp; Calibrate</button>
       <a class="btn" href="#interactive-map">Discover</a>
 
       <button type="button" class="menu" id="nav-menu" aria-expanded="false" aria-controls="nav-sheet" aria-label="Menu">
@@ -1011,6 +1012,9 @@
             </div>
 
             <div style="display:flex; gap:10px; margin-top:4px;">
+              <button type="button" onclick="closeRoadModal(); openQAModal('${item.name.replace(/'/g, "\\'")}', ${item.score});" class="popup-btn" style="flex:1; justify-content:center; text-align:center; background:var(--panel); border:1px solid var(--spot); color:var(--spot); font-weight:700;">
+                ⭐ QA &amp; Rate Road
+              </button>
               <a href="/discovered_routes.gpx" download="${item.name.replace(/[^a-zA-Z0-9]/g, '_')}.gpx" class="popup-btn" style="flex:1; justify-content:center; text-align:center;">
                 📥 Download GPX Track
               </a>
@@ -1032,6 +1036,215 @@
       if (event && event.stopPropagation) event.stopPropagation();
       var modal = document.getElementById("road-modal");
       if (modal) modal.remove();
+    }
+
+    function openQAModal(roadName, algoScore) {
+      var name = roadName || "Selected Road";
+      var score = algoScore || 50.0;
+      var modalHtml = `
+        <div class="road-modal-overlay" id="qa-modal" onclick="closeQAModal(event)">
+          <div class="road-modal-card" onclick="event.stopPropagation()" style="max-width:520px;">
+            <div class="road-modal-header">
+              <div>
+                <div class="hd-eyebrow"><s></s>road qa &amp; driver feedback</div>
+                <h3 style="margin:4px 0 0; font-family:var(--disp); font-size:20px; font-weight:800; color:var(--ink);">${name}</h3>
+              </div>
+              <button type="button" class="road-modal-close" onclick="closeQAModal()">&times;</button>
+            </div>
+
+            <form onsubmit="handleQASubmit(event)">
+              <input type="hidden" id="qa-road-name" value="${name}">
+              <input type="hidden" id="qa-algo-score" value="${score}">
+
+              <div style="display:flex; flex-direction:column; gap:12px; margin-top:8px;">
+                <div>
+                  <label style="font-family:var(--mono); font-size:11px; color:var(--dim); text-transform:uppercase; display:block; margin-bottom:4px;">Driver Rating (1 to 5 Stars)</label>
+                  <select id="qa-star-rating" style="width:100%; padding:8px; background:var(--bg); color:var(--ink); border:1px solid var(--line2); font-family:var(--mono); font-size:13px;" required>
+                    <option value="5">⭐⭐⭐⭐⭐ 5 Stars - Enthusiast Driving Masterpiece</option>
+                    <option value="4" selected>⭐⭐⭐⭐ 4 Stars - Fun Twisty Road</option>
+                    <option value="3">⭐⭐⭐ 3 Stars - Average / Decent</option>
+                    <option value="2">⭐⭐ 2 Stars - Disappointing / Traffic Heavy</option>
+                    <option value="1">⭐ 1 Star - Avoid (Residential / Trap / Boring)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style="font-family:var(--mono); font-size:11px; color:var(--dim); text-transform:uppercase; display:block; margin-bottom:4px;">Target Score Override (Current Algo Score: ${score.toFixed(1)} / 100)</label>
+                  <input type="number" id="qa-suggested-score" value="${score.toFixed(1)}" min="0" max="100" step="1" style="width:100%; padding:8px; background:var(--bg); color:var(--ink); border:1px solid var(--line2); font-family:var(--mono); font-size:13px;" placeholder="Suggested true score (0-100)">
+                </div>
+
+                <div>
+                  <label style="font-family:var(--mono); font-size:11px; color:var(--dim); text-transform:uppercase; display:block; margin-bottom:6px;">Road Tags &amp; Feedback Flags</label>
+                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-family:var(--mono); font-size:11.5px; color:var(--ink);">
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="qa-tag" value="great_sweepers"> 🏎️ Great Sweepers</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="qa-tag" value="too_residential"> 🏡 Too Residential</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="qa-tag" value="high_police_presence"> 👮 High Cop / Radar</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="qa-tag" value="heavy_stoplights"> 🚦 Heavy Traffic Lights</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="qa-tag" value="rough_pavement"> 🚜 Rough Pavement</label>
+                    <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" name="qa-tag" value="scenic_views"> 🏔️ Scenic Views</label>
+                  </div>
+                </div>
+
+                <div>
+                  <label style="font-family:var(--mono); font-size:11px; color:var(--dim); text-transform:uppercase; display:block; margin-bottom:4px;">Driver Commentary &amp; Notes</label>
+                  <textarea id="qa-notes" rows="2" style="width:100%; padding:8px; background:var(--bg); color:var(--ink); border:1px solid var(--line2); font-family:var(--mono); font-size:12px; box-sizing:border-box;" placeholder="e.g. Too many driveways and 25mph residential zone..."></textarea>
+                </div>
+
+                <div style="display:flex; gap:10px; margin-top:8px;">
+                  <button type="submit" class="btn-action-primary" style="flex:1; justify-content:center;">
+                    ⭐ Submit QA Rating &rarr;
+                  </button>
+                  <button type="button" onclick="closeQAModal()" class="btn-action-secondary" style="flex:1; justify-content:center;">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+
+      var existing = document.getElementById("qa-modal");
+      if (existing) existing.remove();
+      document.body.insertAdjacentHTML("beforeend", modalHtml);
+    }
+
+    function closeQAModal(e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      var m = document.getElementById("qa-modal");
+      if (m) m.remove();
+    }
+
+    function handleQASubmit(e) {
+      e.preventDefault();
+      var roadName = document.getElementById("qa-road-name").value;
+      var algoScore = parseFloat(document.getElementById("qa-algo-score").value);
+      var userRating = parseInt(document.getElementById("qa-star-rating").value, 10);
+      var suggestedScore = parseFloat(document.getElementById("qa-suggested-score").value);
+      var notes = document.getElementById("qa-notes").value.trim();
+
+      var checkedTags = [];
+      document.querySelectorAll('input[name="qa-tag"]:checked').forEach(cb => checkedTags.push(cb.value));
+
+      showToast("Saving QA feedback for " + roadName + "...");
+
+      fetch("/api/qa/rate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          road_name: roadName,
+          user_rating: userRating,
+          algo_score: algoScore,
+          suggested_score: suggestedScore,
+          tags: checkedTags,
+          notes: notes
+        })
+      })
+      .then(res => res.json())
+      .then(data => {
+        hideToast();
+        closeQAModal();
+        alert("✅ QA feedback saved! Thank you for improving the road engine algorithm.");
+      })
+      .catch(err => {
+        hideToast();
+        alert("Error saving QA feedback: " + err.message);
+      });
+    }
+
+    function openQADashboard() {
+      showToast("Loading QA & Algorithm Calibration Metrics...");
+      fetch("/api/qa/summary")
+        .then(res => res.json())
+        .then(data => {
+          hideToast();
+          var records = data.records || [];
+          var tagCounts = data.tag_counts || {};
+
+          var tagsHtml = Object.keys(tagCounts).map(t => `<span class="modal-badge" style="border:1px solid var(--line2); color:var(--ink);">${t}: ${tagCounts[t]}</span>`).join(" ");
+
+          var modalHtml = `
+            <div class="road-modal-overlay" id="qa-dashboard-modal" onclick="closeQADashboardModal(event)">
+              <div class="road-modal-card" onclick="event.stopPropagation()" style="max-width:620px;">
+                <div class="road-modal-header">
+                  <div>
+                    <div class="hd-eyebrow"><s></s>algorithm qa &amp; continuous tuning</div>
+                    <h3 style="margin:4px 0 0; font-family:var(--disp); font-size:22px; font-weight:800; color:var(--ink);">Algorithm QA &amp; Calibration Dashboard</h3>
+                  </div>
+                  <button type="button" class="road-modal-close" onclick="closeQADashboardModal()">&times;</button>
+                </div>
+
+                <div class="road-modal-badges">
+                  <span class="modal-badge" style="background:var(--spot); color:var(--spot-ink); font-weight:700;">
+                    🎯 Algo Accuracy: ${data.accuracy_pct}%
+                  </span>
+                  <span class="modal-badge" style="border:1px solid var(--line2); color:var(--ink);">
+                    📊 Mean Abs Error: ${data.mean_absolute_error} pts
+                  </span>
+                  <span class="modal-badge" style="border:1px solid var(--line2); color:var(--dim);">
+                    📝 Total QA Ratings: ${data.total_ratings}
+                  </span>
+                </div>
+
+                <div style="font-family:var(--mono); font-size:12px; color:var(--dim);">
+                  <strong>Top QA Driver Flags:</strong>
+                  <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+                    ${tagsHtml || '<span style="color:var(--muted);">No QA flags logged yet.</span>'}
+                  </div>
+                </div>
+
+                <div class="road-modal-actions" style="margin-top:12px;">
+                  <button type="button" onclick="triggerAlgoCalibration()" class="btn-action-primary" style="flex:1; justify-content:center;">
+                    ⚡ Auto-Calibrate Algorithm Scoring Weights
+                  </button>
+                </div>
+
+                <div style="max-height:180px; overflow-y:auto; background:var(--term-bg); border:1px solid var(--term-border); padding:10px; font-family:var(--mono); font-size:11px;">
+                  <strong style="color:var(--term-text);">Recent Driver QA Benchmark Log:</strong>
+                  ${records.length > 0 ? records.slice().reverse().map(r => `
+                    <div style="border-bottom:1px solid var(--line2); padding:6px 0;">
+                      <span style="color:var(--spot); font-weight:bold;">${r.road_name}</span> &middot; Rated ${r.user_rating}★ (Algo: ${r.algo_score} vs Target: ${r.suggested_score})
+                      ${r.notes ? `<div style="color:var(--dim); font-size:10px;">"${r.notes}"</div>` : ''}
+                    </div>
+                  `).join('') : '<div style="color:var(--dim); padding:8px 0;">No QA entries yet. Click "⭐ QA Road" on any street to submit benchmark feedback!</div>'}
+                </div>
+              </div>
+            </div>
+          `;
+
+          var existing = document.getElementById("qa-dashboard-modal");
+          if (existing) existing.remove();
+          document.body.insertAdjacentHTML("beforeend", modalHtml);
+        })
+        .catch(err => {
+          hideToast();
+          alert("Could not load QA dashboard: " + err.message);
+        });
+    }
+
+    function closeQADashboardModal(e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      var m = document.getElementById("qa-dashboard-modal");
+      if (m) m.remove();
+    }
+
+    function triggerAlgoCalibration() {
+      showToast("Running machine optimization on algorithm weights...");
+      fetch("/api/qa/calibrate", { method: "POST" })
+        .then(res => res.json())
+        .then(data => {
+          hideToast();
+          if (data.status === "no_data") {
+            alert(data.message);
+          } else {
+            alert("⚡ SUCCESS! Algorithm scoring weights re-calibrated successfully!\n\n" + data.message + "\n\nError MAE reduced from " + data.mae_before + " to " + data.mae_after + " points.");
+            openQADashboard();
+          }
+        })
+        .catch(err => {
+          hideToast();
+          alert("Calibration error: " + err.message);
+        });
     }
 
     document.addEventListener("keydown", function(e) {

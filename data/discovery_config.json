@@ -1,0 +1,9 @@
+{
+  "weight_curvature": 43.0,
+  "weight_sinuosity": 35.0,
+  "weight_speed": 20.0,
+  "residential_penalty": 40.0,
+  "signal_penalty": 15.0,
+  "last_calibrated_at": "2026-10-11T23:16:30.572231",
+  "sample_size": 2
+}

@@ -5,7 +5,7 @@ and serves the interactive driving map and herdr.dev styled navigation guide.
 """
 
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,6 +69,16 @@ class PointToPointRequest(BaseModel):
     target_speed: float = Field(50.0, description="Target speed in mph")
 
 
+class QARatingRequest(BaseModel):
+    road_name: str = Field(..., description="Name of the road being rated")
+    user_rating: int = Field(..., ge=1, le=5, description="Human driver rating from 1 to 5 stars")
+    algo_score: float = Field(..., description="Current algorithm calculated fun score")
+    suggested_score: Optional[float] = Field(None, description="Driver suggested true score (0-100)")
+    tags: Optional[List[str]] = Field(default_factory=list, description="Tags like 'too_residential', 'heavy_stoplights', 'great_sweepers'")
+    notes: Optional[str] = Field("", description="Driver feedback notes")
+    location: Optional[str] = Field("", description="Geographic area or town name")
+
+
 @app.get("/health")
 def health_check():
     """Health check probe."""
@@ -108,6 +118,39 @@ def route_loop_post(req: LoopRouteRequest):
 def route_p2p_post(req: PointToPointRequest):
     """Generate a twisty point-to-point driving route between Origin and Destination."""
     return run_p2p_routing(req.origin, req.destination, req.target_speed)
+
+
+@app.post("/api/qa/rate")
+def rate_road_qa(req: QARatingRequest):
+    """Submit a driver QA rating and feedback record for a road."""
+    from .qa import RoadQAEngine
+    qa_engine = RoadQAEngine()
+    record = qa_engine.add_feedback(
+        road_name=req.road_name,
+        user_rating=req.user_rating,
+        algo_score=req.algo_score,
+        suggested_score=req.suggested_score,
+        tags=req.tags,
+        notes=req.notes or "",
+        location=req.location or ""
+    )
+    return {"status": "success", "message": "QA rating saved successfully", "record": record}
+
+
+@app.get("/api/qa/summary")
+def get_qa_summary():
+    """Retrieve aggregate QA feedback metrics and algorithm accuracy stats."""
+    from .qa import RoadQAEngine
+    qa_engine = RoadQAEngine()
+    return qa_engine.get_qa_summary()
+
+
+@app.post("/api/qa/calibrate")
+def calibrate_algorithm_weights():
+    """Re-calibrate algorithm scoring weights based on human QA benchmark ratings."""
+    from .qa import RoadQAEngine
+    qa_engine = RoadQAEngine()
+    return qa_engine.calibrate_weights()
 
 
 def save_geojson_outputs(engine: RoadDiscoveryEngine, geojson: Dict[str, Any]):
