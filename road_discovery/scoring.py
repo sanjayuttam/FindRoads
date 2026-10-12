@@ -156,10 +156,18 @@ def calculate_composite_score(
     if config is None:
         config = DiscoveryConfig()
 
+    # Curvature-gated speed score: speed is only a positive driving score if the road is curvy
+    min_curv = getattr(config, "min_curvature_threshold", 30.0)
+    if curvature_score < min_curv:
+        speed_gate = max(0.05, (max(0.0, curvature_score) / min_curv) ** 1.5)
+        effective_speed_score = speed_score * speed_gate
+    else:
+        effective_speed_score = speed_score
+
     weighted_base = (
         (config.weight_curvature * curvature_score)
         + (config.weight_sinuosity * sinuosity_score)
-        + (config.weight_speed * speed_score)
+        + (config.weight_speed * effective_speed_score)
     )
 
     # Police Patrol / Cop Enforcement Adjustment
@@ -174,19 +182,18 @@ def calculate_composite_score(
 
     net_score = max(0.0, weighted_base - traffic_penalty - float(smoothness_penalty) + cop_adj)
 
-    # High-Speed Sweeping Twistiness Synergy Bonus (45-55 mph + active curvature)
+    # High-Speed Sweeping Twistiness Synergy Bonus (45-55 mph + active technical curvature)
     # Rewards thrilling high-momentum corridors (e.g. Hawk's Nest NY 97, NY 17A, Lime Kiln Rd)
-    if speed_score >= 80.0 and curvature_score >= 18.0:
+    if speed_score >= 80.0 and curvature_score >= 35.0:
         net_score += 8.0
 
     # Pristine Remote Flow Bonus (zero signals, zero commercial strip malls, long continuous run)
-    if traffic_penalty == 0.0 and length_km >= 5.0:
+    if traffic_penalty == 0.0 and length_km >= 5.0 and curvature_score >= 25.0:
         net_score += 5.0
 
-    # Straight road dampener: heavily scale down straight arterials (e.g. NY 17M)
-    min_curv = getattr(config, "min_curvature_threshold", 20.0)
+    # Straight road dampener: heavily scale down straight arterials (e.g. CR 694 / NY 17M)
     if min_curv > 0 and curvature_score < min_curv:
-        straight_factor = min(1.0, max(0.1, (max(0.0, curvature_score) / min_curv) ** 1.5))
+        straight_factor = max(0.05, (max(0.0, curvature_score) / min_curv) ** 2.0)
         net_score *= straight_factor
 
     length_mult = calculate_length_multiplier(length_km, config=config)

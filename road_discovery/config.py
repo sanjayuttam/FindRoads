@@ -113,7 +113,7 @@ class DiscoveryConfig:
     weight_speed: float = 0.25      # 25% speed suitability window
 
     # Minimum curvature score threshold to avoid heavy straight-road dampening
-    min_curvature_threshold: float = 20.0
+    min_curvature_threshold: float = 30.0
 
     # Cop Risk Penalty Weight
     # High police risk corridors (> 35%) incur score penalties to reward secluded remote roads

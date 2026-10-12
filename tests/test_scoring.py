@@ -175,6 +175,20 @@ class TestGeometryAndScoring(unittest.TestCase):
         self.assertTrue(comp_straight < 15.0)
         self.assertTrue(comp_curvy > 75.0)
 
+    def test_straight_road_cr694_dampening(self):
+        # Straight 45 mph connecting corridor (like CR 694 Main St) with low curvature (18.0) and high speed score (82.2)
+        score_cr694 = calculate_composite_score(
+            curvature_score=18.0,
+            sinuosity_score=10.0,
+            speed_score=82.2,
+            traffic_penalty=0.0,
+            length_km=2.0,
+            cop_risk_pct=20.0,
+            config=self.config,
+        )
+        # Should be heavily dampened below 20 (Smooth Highway / Green)
+        self.assertTrue(score_cr694 < 20.0, f"Expected < 20.0, got {score_cr694}")
+
     def test_cop_risk_score_impact(self):
         # High cop enforcement risk (85%) should reduce score compared to low cop risk (15%)
         comp_high_cop = calculate_composite_score(
