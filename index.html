@@ -774,6 +774,7 @@
           <div class="popup-actions" style="flex-wrap:wrap; gap:6px;">
             ${gmapsUrl ? `<a href="${gmapsUrl}" target="_blank" class="popup-btn">📍 Google Maps Tour</a>` : ''}
             ${streetViewUrl ? `<a href="${streetViewUrl}" target="_blank" class="popup-btn" style="background:var(--spot); color:var(--spot-ink);" title="Open Google Street View">📷 Street View</a>` : ''}
+            <button type="button" onclick="openQAModal('${name.replace(/'/g, "\\'")}', ${score});" class="popup-btn" style="background:var(--panel); color:var(--spot); border:1px solid var(--spot); font-weight:700;">⭐ QA Road</button>
             <button type="button" onclick="openRoadModal(${idx});" class="popup-btn" style="background:var(--panel); color:var(--ink); border:1px solid var(--line2); font-weight:600;">📊 Full Telemetry Modal</button>
             <a href="/discovered_routes.gpx" download class="popup-btn">📥 GPX</a>
           </div>
