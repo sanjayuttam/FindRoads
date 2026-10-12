@@ -1162,6 +1162,9 @@
           hideToast();
           var records = data.records || [];
           var tagCounts = data.tag_counts || {};
+          var accuracy = data.accuracy_pct !== undefined ? data.accuracy_pct : 100.0;
+          var mae = data.mean_absolute_error !== undefined ? data.mean_absolute_error : 0.0;
+          var totalRatings = data.total_ratings !== undefined ? data.total_ratings : 0;
 
           var tagsHtml = Object.keys(tagCounts).map(t => `<span class="modal-badge" style="border:1px solid var(--line2); color:var(--ink);">${t}: ${tagCounts[t]}</span>`).join(" ");
 
@@ -1178,13 +1181,13 @@
 
                 <div class="road-modal-badges">
                   <span class="modal-badge" style="background:var(--spot); color:var(--spot-ink); font-weight:700;">
-                    🎯 Algo Accuracy: ${data.accuracy_pct}%
+                    🎯 Algo Accuracy: ${accuracy}%
                   </span>
                   <span class="modal-badge" style="border:1px solid var(--line2); color:var(--ink);">
-                    📊 Mean Abs Error: ${data.mean_absolute_error} pts
+                    📊 Mean Abs Error: ${mae} pts
                   </span>
                   <span class="modal-badge" style="border:1px solid var(--line2); color:var(--dim);">
-                    📝 Total QA Ratings: ${data.total_ratings}
+                    📝 Total QA Ratings: ${totalRatings}
                   </span>
                 </div>
 
