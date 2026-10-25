@@ -35,6 +35,49 @@ class LoopRouteBuilder:
     def __init__(self, config: Optional[DiscoveryConfig] = None):
         self.config = config or DiscoveryConfig()
 
+    @staticmethod
+    def _assign_backroad_weights(G_undir: nx.Graph) -> None:
+        """Assign 'backroad_cost' to every edge to heavily penalize highways (e.g. Rt 17, I-87) and reward curvy backroads."""
+        import re
+        hw_ref_re = re.compile(
+            r"\b(I-\d+|Interstate|NY\s*17\b|NJ\s*17\b|Rt\.?\s*17\b|Route\s*17\b|US\s*9W\b|Thruway|Turnpike|Parkway|Expressway)\b",
+            re.IGNORECASE,
+        )
+        for u, v, k, data in G_undir.edges(keys=True, data=True):
+            length = float(data.get("length", 100.0) or 100.0)
+            hw = data.get("highway", "secondary")
+            if isinstance(hw, (list, tuple)):
+                hw = hw[0]
+            hw_str = str(hw).lower()
+
+            ref = data.get("canonical_ref") or data.get("ref") or ""
+            name = data.get("canonical_name") or data.get("name") or ""
+            if isinstance(ref, (list, tuple)):
+                ref = " ".join(str(x) for x in ref)
+            if isinstance(name, (list, tuple)):
+                name = " ".join(str(x) for x in name)
+            combined_label = f"{ref} {name}"
+
+            multiplier = 1.0
+            if hw_str in ("motorway", "motorway_link", "trunk", "trunk_link") or hw_ref_re.search(combined_label):
+                # 12x penalty on major highways like Rt 17 / I-87 so they are avoided unless an unavoidable bridge/crossing
+                multiplier = 12.0
+            elif hw_str in ("primary", "primary_link"):
+                multiplier = 3.2
+            elif hw_str in ("secondary", "tertiary", "unclassified"):
+                multiplier = 0.65
+
+            geom = data.get("geometry")
+            if geom is not None and length > 80.0:
+                try:
+                    sin = calculate_sinuosity(geom)
+                    if sin >= 1.15 and multiplier <= 1.0:
+                        multiplier *= 0.65
+                except Exception:
+                    pass
+
+            data["backroad_cost"] = max(1.0, length * multiplier)
+
     def build_loop_circuit(
         self, G: nx.MultiDiGraph, start_lat: float, start_lon: float, target_miles: float = 25.0
     ) -> Dict[str, Any]:
@@ -119,7 +162,8 @@ class LoopRouteBuilder:
             step = max(1, len(comp_nodes) // 4)
             anchor_nodes = [comp_nodes[i] for i in range(0, len(comp_nodes), step)[:3] if comp_nodes[i] != start_node]
 
-        # 3. Form closed circuit path: start -> wp1 -> wp2 -> wp3 -> wp4 -> start
+        # 3. Form closed circuit path: start -> wp1 -> wp2 -> wp3 -> wp4 -> start (using highway-avoiding backroad_cost)
+        self._assign_backroad_weights(G_undir)
         circuit_nodes = [start_node] + anchor_nodes[:4] + [start_node]
         full_node_path = []
 
@@ -127,7 +171,7 @@ class LoopRouteBuilder:
             u_node = circuit_nodes[i]
             v_node = circuit_nodes[i + 1]
             try:
-                sub_path = nx.shortest_path(G_undir, source=u_node, target=v_node, weight="length")
+                sub_path = nx.shortest_path(G_undir, source=u_node, target=v_node, weight="backroad_cost")
                 if full_node_path and sub_path:
                     full_node_path.extend(sub_path[1:])
                 else:
@@ -326,8 +370,9 @@ class LoopRouteBuilder:
         if not start_node or not end_node:
             raise ValueError("Could not resolve origin/destination nodes on network graph.")
 
+        self._assign_backroad_weights(G_undir)
         try:
-            node_path = nx.shortest_path(G_undir, source=start_node, target=end_node, weight="length")
+            node_path = nx.shortest_path(G_undir, source=start_node, target=end_node, weight="backroad_cost")
         except Exception as e:
             raise ValueError(f"No connected path found between origin and destination: {e}")
 
@@ -501,4 +546,199 @@ class LoopRouteBuilder:
                 "google_maps_tour_url": gmaps_p2p
             },
             "features": features
+        }
+
+    def build_valhalla_backroad_p2p(
+        self, orig_lat: float, orig_lon: float, dest_lat: float, dest_lon: float
+    ) -> Dict[str, Any]:
+        """Build a highway-avoiding backroad corridor via Valhalla (use_highways=0.0, top_speed=48) + lateral ridge offset."""
+        import json
+        import re
+        import urllib.request
+
+        def decode_poly6(encoded: str) -> List[Tuple[float, float]]:
+            inv = 1.0 / 1e6
+            decoded = []
+            prev = [0, 0]
+            i = 0
+            while i < len(encoded):
+                ll = [0, 0]
+                for j in (0, 1):
+                    shift = 0
+                    byte = 0x20
+                    while byte >= 0x20:
+                        byte = ord(encoded[i]) - 63
+                        i += 1
+                        ll[j] |= (byte & 0x1F) << shift
+                        shift += 5
+                    ll[j] = prev[j] + (~(ll[j] >> 1) if (ll[j] & 1) else (ll[j] >> 1))
+                    prev[j] = ll[j]
+                decoded.append((round(ll[1] * inv, 6), round(ll[0] * inv, 6)))  # (lon, lat)
+            return decoded
+
+        dlat = dest_lat - orig_lat
+        dlon = dest_lon - orig_lon
+        mid_lat = (orig_lat + dest_lat) * 0.5
+        mid_lon = (orig_lon + dest_lon) * 0.5
+        chord_deg = math.hypot(dlat, dlon)
+
+        candidates = []
+        if chord_deg > 0.09:
+            candidates.append([
+                {"lat": orig_lat, "lon": orig_lon, "type": "break"},
+                {"lat": orig_lat + dlat * 0.28 - dlon * 0.15, "lon": orig_lon + dlon * 0.28 - abs(dlat) * 0.15, "type": "through", "radius": 3500},
+                {"lat": orig_lat + dlat * 0.68 - dlon * 0.12, "lon": orig_lon + dlon * 0.68 - abs(dlat) * 0.12, "type": "through", "radius": 3500},
+                {"lat": dest_lat, "lon": dest_lon, "type": "break"},
+            ])
+            candidates.append([
+                {"lat": orig_lat, "lon": orig_lon, "type": "break"},
+                {"lat": orig_lat + dlat * 0.28 + dlon * 0.15, "lon": orig_lon + dlon * 0.28 + abs(dlat) * 0.15, "type": "through", "radius": 3500},
+                {"lat": orig_lat + dlat * 0.68 + dlon * 0.12, "lon": orig_lon + dlon * 0.68 + abs(dlat) * 0.12, "type": "through", "radius": 3500},
+                {"lat": dest_lat, "lon": dest_lon, "type": "break"},
+            ])
+        candidates.append([
+            {"lat": orig_lat, "lon": orig_lon, "type": "break"},
+            {"lat": dest_lat, "lon": dest_lon, "type": "break"},
+        ])
+
+        hw_re = re.compile(
+            r"\b(I-\d+|Interstate|NY\s*17\b|NJ\s*17\b|Rt\.?\s*17\b|Route\s*17\b|State\s*Highway\s*17\b|US\s*9W\b|Thruway|Turnpike\s*Mainline|Parkway|Expressway)\b",
+            re.IGNORECASE,
+        )
+
+        best_leg = None
+        best_hw_mi = float("inf")
+
+        for locs in candidates:
+            payload = {
+                "locations": locs,
+                "costing": "auto",
+                "costing_options": {
+                    "auto": {
+                        "use_highways": 0.0,
+                        "use_tolls": 0.0,
+                        "top_speed": 48,
+                        "shortest": False,
+                    }
+                },
+                "directions_options": {"units": "miles", "language": "en-US"},
+            }
+            req = urllib.request.Request(
+                "https://valhalla1.openstreetmap.de/route",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "FindRoadsNav/1.0"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=14) as resp:
+                    vdata = json.loads(resp.read().decode("utf-8"))
+                    leg = (vdata.get("trip") or {}).get("legs", [None])[0]
+                    if not leg or not leg.get("shape"):
+                        continue
+                    max_hw = 0.0
+                    for m in leg.get("maneuvers", []):
+                        names = " ".join((m.get("street_names") or []) + (m.get("begin_street_names") or []))
+                        m_len = float(m.get("length", 0.0) or 0.0)
+                        if hw_re.search(names) and m_len > max_hw:
+                            max_hw = m_len
+                    if max_hw < best_hw_mi:
+                        best_hw_mi = max_hw
+                        best_leg = leg
+                    if max_hw <= 0.5:
+                        break
+            except Exception:
+                continue
+
+        if not best_leg:
+            raise ValueError("Valhalla backroad routing unavailable")
+
+        pts = decode_poly6(best_leg["shape"])
+        grouped_legs = []
+        cur_name = ""
+        cur_coords: List[Tuple[float, float]] = []
+        cur_speed = 45.0
+
+        for m in best_leg.get("maneuvers", []):
+            b_idx = int(m.get("begin_shape_index", 0))
+            e_idx = int(m.get("end_shape_index", 0))
+            if e_idx <= b_idx:
+                continue
+            streets = m.get("street_names") or []
+            beg_streets = m.get("begin_street_names") or []
+            raw_name = streets[0] if streets else (beg_streets[0] if beg_streets else "")
+            alt_ref = streets[1] if len(streets) > 1 else ""
+            label = raw_name or "Scenic Backroad"
+            if alt_ref and raw_name and alt_ref not in raw_name:
+                label = f"{alt_ref} ({raw_name})"
+
+            slice_pts = pts[b_idx : e_idx + 1]
+            if len(slice_pts) < 2:
+                continue
+
+            if cur_name and label != cur_name and len(cur_coords) >= 2:
+                grouped_legs.append({"name": cur_name, "coords": cur_coords, "speed": cur_speed, "highway": "secondary"})
+                cur_coords = [cur_coords[-1]]
+            cur_name = label
+            for pt in slice_pts:
+                if not cur_coords or cur_coords[-1] != pt:
+                    cur_coords.append(pt)
+
+        if len(cur_coords) >= 2:
+            grouped_legs.append({"name": cur_name or "Scenic Backroad", "coords": cur_coords, "speed": cur_speed, "highway": "secondary"})
+
+        features = []
+        total_p2p_km = 0.0
+        for idx, leg in enumerate(grouped_legs, start=1):
+            ls = LineString(leg["coords"])
+            length_km = calculate_line_length_km(ls)
+            if length_km < 0.05:
+                continue
+            total_p2p_km += length_km
+            sinuosity = calculate_sinuosity(ls)
+            twistiness = calculate_angular_twistiness(ls)
+            cop_risk = calculate_cop_enforcement_risk(
+                highway_type=leg["highway"],
+                speed_mph=leg["speed"],
+                sinuosity=sinuosity,
+            )
+            scores = score_route_metrics(
+                sinuosity=sinuosity,
+                twistiness_deg_per_km=twistiness["twistiness_deg_per_km"],
+                speed_mph=leg["speed"],
+                length_km=length_km,
+                cop_risk_pct=cop_risk["risk_pct"],
+                config=self.config,
+            )
+            features.append({
+                "type": "Feature",
+                "geometry": mapping(ls),
+                "properties": {
+                    "rank": len(features) + 1,
+                    "seq": len(features) + 1,
+                    "road_name": leg["name"],
+                    "name": leg["name"],
+                    "length_km": float(length_km),
+                    "avg_speed_limit": float(leg["speed"]),
+                    "composite_driving_score": float(scores["composite_driving_score"]),
+                    "score": float(scores["composite_driving_score"]),
+                    "cop_risk_pct": float(cop_risk["risk_pct"]),
+                    "cop_risk_level": str(cop_risk["level"]),
+                    "cop_risk_color": str(cop_risk["badge_color"]),
+                    "cop_risk_desc": str(cop_risk["description"]),
+                    "highway_type": str(leg["highway"]),
+                    "google_maps_url": generate_google_maps_url(ls),
+                    "street_view_url": generate_street_view_url(ls),
+                },
+            })
+
+        return {
+            "type": "FeatureCollection",
+            "metadata": {
+                "generator": "RoadDiscoveryEngineCorridorBuilder",
+                "route_mode": "point_to_point",
+                "total_corridor_miles": float(total_p2p_km * 0.621371),
+                "total_routes_found": len(features),
+                "origin_coords": [orig_lat, orig_lon],
+                "destination_coords": [dest_lat, dest_lon],
+            },
+            "features": features,
         }

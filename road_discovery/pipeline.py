@@ -96,10 +96,19 @@ class RoadDiscoveryEngine:
         return builder.build_loop_circuit(G, start_lat=lat, start_lon=lon, target_miles=loop_miles)
 
     def build_p2p_route(self, origin: str, destination: str) -> Dict[str, Any]:
-        """Generate a continuous point-to-point driving corridor between origin and destination."""
+        """Generate a continuous highway-avoiding point-to-point driving corridor between origin and destination."""
         import osmnx as ox
         lat1, lon1 = ox.geocode(origin)
         lat2, lon2 = ox.geocode(destination)
+
+        builder = LoopRouteBuilder(self.config)
+        # Prefer Highway-Zero Backroad Corridor (avoids long highway stretches like Rt 17 / I-87)
+        try:
+            return builder.build_valhalla_backroad_p2p(
+                orig_lat=lat1, orig_lon=lon1, dest_lat=lat2, dest_lon=lon2
+            )
+        except Exception as e:
+            print(f"[P2P Valhalla Note] Falling back to local OSMnx graph with 12x highway penalty: {e}")
 
         west = min(lon1, lon2) - 0.05
         east = max(lon1, lon2) + 0.05
@@ -108,7 +117,6 @@ class RoadDiscoveryEngine:
         bbox = (west, south, east, north)
 
         G = self.ingester.fetch_from_bbox(bbox)
-        builder = LoopRouteBuilder(self.config)
         return builder.build_p2p_corridor(G, orig_lat=lat1, orig_lon=lon1, dest_lat=lat2, dest_lon=lon2)
 
     def _process_network_to_geojson(self, G) -> Dict[str, Any]:
